@@ -1,0 +1,76 @@
+{
+	"config": {
+		"step": {
+			"user": {
+				"title": "扫描 BLE 设备",
+				"description": "选择要添加的 BLE 防丢标签设备",
+				"data": {
+					"address": "设备地址"
+				}
+			},
+			"confirm": {
+				"title": "确认添加设备",
+				"description": "是否要添加此设备？"
+			}
+		},
+		"error": {
+			"already_configured": "设备已添加",
+			"cannot_connect": "无法连接到设备",
+			"unknown": "未知错误"
+		},
+		"abort": {
+			"already_in_progress": "配置流程已在进行中",
+			"already_configured": "设备已配置",
+			"no_devices_found": "未找到设备",
+			"not_supported": "设备不支持"
+		}
+	},
+	"options": {
+		"step": {
+			"init": {
+				"title": "配置选项",
+				"description": "修改设备配置选项",
+				"data": {
+					"maintain_connection": "保持连接",
+					"battery_poll_interval_min": "电量轮询间隔（分钟）",
+					"rssi_threshold": "RSSI阈值（信号强度）",
+					"timeout_threshold": "超时阈值（秒）",
+					"button_action_mode": "按键动作模式",
+					"power_mode": "电源模式"
+				}
+			}
+		}
+	},
+	"entity": {
+		"sensor": {
+			"battery": {
+				"name": "电量"
+			},
+			"rssi": {
+				"name": "信号强度"
+			},
+			"last_button_press": {
+				"name": "最后按键时间"
+			}
+		},
+		"binary_sensor": {
+			"connection": {
+				"name": "连接状态"
+			},
+			"presence": {
+				"name": "在线状态"
+			},
+			"button_pressed": {
+				"name": "按键触发"
+			}
+		},
+		"button": {
+			"disconnect": {
+				"name": "断开连接"
+			},
+			"refresh_battery": {
+				"name": "刷新电量"
+			}
+		}
+	}
+}
