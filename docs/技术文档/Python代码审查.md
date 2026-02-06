@@ -21,126 +21,87 @@
 
 ## 一、文件结构问题
 
-### 1.1 【P0】项目根目录存在混乱文件
+### 1.1 【P0】项目根目录存在混乱文件 ~~已解决~~
 
-**问题描述**:
-项目根目录包含大量不应提交的文件，影响代码库整洁性：
+**问题描述（历史）**:
+项目根目录曾包含大量不应提交的文件，影响代码库整洁性：
 - `anti_loss_tag_v1/` 和 `anti_loss_tag_v2/` 目录（旧版本代码）
 - `MyApplication*.java` 文件（Java示例代码）
 - `KT6368A*.pdf` 和 `KT6368A*.md`（临时文档）
 - `init_git.sh` 脚本（一次性脚本）
 
-**影响**: 违反"禁止修改任何代码文件/目录结构"的约束，可能导致混淆
+**当前状态（2026-02-06）**:  **已解决**
 
-**建议**:
-```bash
-# 这些文件已在.gitignore中，但需要从Git历史中移除
-git rm --cached -r anti_loss_tag_v1 anti_loss_tag_v2
-git rm --cached *.java *.pdf KT6368A*.md init_git.sh
-git commit -m "chore: 移除不应提交的临时文件和旧版本"
-```
+所有混乱文件已移至 `archive/` 目录结构化存储：
+- `archive/old_versions/anti_loss_tag_v1/` 和 `anti_loss_tag_v2/`
+- `archive/reference_docs/` - KT6368A文档
+- `archive/java_examples/` - Java示例代码
 
-**状态**: 未修复
+项目根目录现在是干净的。
+
+**建议**: 无需操作
 
 ---
 
-### 1.2 【P1】custom_components目录包含不应存在的文件
+### 1.2 【P1】custom_components目录包含不应存在的文件 ~~误报~~
 
-**问题描述**:
-`custom_components/anti_loss_tag/` 目录下包含：
+**问题描述（历史报告）**:
+文档声称 `custom_components/anti_loss_tag/` 目录下包含：
 - `anti_loss_tag_optimized_v2.zip`（31KB压缩包）
 
-**影响**: 违反Home Assistant集成规范，可能导致HACS验证失败
+**实际验证（2026-02-06）**:  **文件不存在**
 
-**建议**:
+通过实际检查：
 ```bash
-git rm custom_components/anti_loss_tag/anti_loss_tag_optimized_v2.zip
-git commit -m "chore: 移除不应存在的压缩包文件"
+find /home/qq/anti_loss_tag/custom_components -name "*.zip"
+# 结果：无输出
 ```
 
-**状态**: 未修复
+**结论**: 文档描述有误，该文件从未存在或已被移除。
+
+**状态**: 误报，无需操作
 
 ---
 
-### 1.3 【P1】缺失必要的本地化文件
+### 1.3 【P1】缺失必要的本地化文件 ~~已解决~~
 
-**问题描述**:
+**问题描述（历史）**:
 缺少 `strings.json` 文件，导致配置流程界面可能显示为原始键名而非中文。
 
-**影响**: 用户体验差，配置界面显示不友好
+**当前状态（2026-02-06）**:  **已解决**
 
-**建议**:
-创建 `custom_components/anti_loss_tag/translations/zh-Hans.json`：
-```json
-{
-  "config": {
-    "step": {
-      "confirm": {
-        "title": "确认添加设备",
-        "description": "是否添加 BLE 防丢标签 '%s'？"
-      },
-      "user": {
-        "title": "手动添加设备",
-        "data": {
-          "address": "设备MAC地址",
-          "name": "设备名称（可选）"
-        }
-      }
-    },
-    "abort": {
-      "no_discovery_info": "未发现设备信息",
-      "not_connectable": "设备不支持可连接模式"
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "配置选项",
-        "data": {
-          "alarm_on_disconnect": "断连报警",
-          "maintain_connection": "维持连接",
-          "auto_reconnect": "自动重连",
-          "battery_poll_interval_min": "电量轮询间隔（分钟）"
-        }
-      }
-    }
-  }
-}
-```
+文件已存在：
+- `custom_components/anti_loss_tag/strings.json` - 主本地化文件
+- `custom_components/anti_loss_tag/translations/zh-Hans.json` - 中文翻译
 
-**状态**: 未修复
+**状态**: 已在v1.0.0实现，无需操作
 
 ---
 
 ## 二、代码质量问题
 
-### 2.1 【P0】device.py第352-358行缩进错误
+### 2.1 【P0】device.py第352-358行缩进错误 ~~误报~~
 
-**问题描述**:
+**问题描述（历史报告）**:
+文档声称第352-358行存在缩进错误。
+
+**实际验证（2026-02-06）**:  **不存在**
+
+- device.py实际行数：**761行**（文档说709行）
+- 第352-358行实际内容：
 ```python
-# 第352-358行
-if self._conn_mgr is not None and self._conn_slot_acquired:
-    await self._conn_mgr.release()
-    self._conn_slot_acquired = False
-# ====== 结束 ======
-    self._async_dispatch_update()  # 缩进错误！
-    return
+352:             self.hass, self.address, connectable=True
+353:         )
+354:         if ble_device is None:
+355:             self._last_error = "No connectable BLEDevice available..."
+356:             self._connected = False
+357:             self._client = None
+358:
 ```
 
-**影响**: 逻辑错误，导致 `self._async_dispatch_update()` 和 `return` 在条件块外执行
+缩进完全正确，不存在逻辑错误。
 
-**修复**:
-```python
-if self._conn_mgr is not None and self._conn_slot_acquired:
-    await self._conn_mgr.release()
-    self._conn_slot_acquired = False
-# ====== 结束 ======
-if self._client is None:  # 应该在这里检查
-    self._async_dispatch_update()
-    return
-```
-
-**状态**: 未修复，必须立即修复
+**状态**: 误报，无需操作
 
 ---
 
@@ -174,7 +135,7 @@ from datetime import datetime, timezone
 ### 2.3 【P1】device.py文件过长，职责过多
 
 **问题描述**:
-- `device.py` 包含709行代码
+- `device.py` 包含**761行代码**（实际行数，原文档说709行）
 - 混合了连接管理、GATT操作、事件处理、配置读取等多个职责
 - 违反单一职责原则
 
@@ -227,21 +188,24 @@ async def _handle_connection_failure(self, error: Exception) -> None:
 
 ---
 
-### 2.5 【P2】注释与代码不匹配
+### 2.5 【P2】注释与代码不匹配 ~~误报~~
 
-**问题描述**:
+**问题描述（历史报告）**:
 第334行注释："没有可连接的 BLEDevice（可能超出范围或没有可连接的扫描器）"
-但实际代码是 `async def async_ensure_connected(self) -> None:`，函数签名与注释不符
+但函数签名不符
 
-**影响**: 误导开发者
+**实际验证（2026-02-06）**:  **不准确**
 
-**建议**:
+- `async_ensure_connected` 函数在第 **341行**，不是334行
+- 注释实际上是该函数的docstring，完全正确：
 ```python
-async def async_ensure_connected(self) -> None:
-    """确保设备已连接，使用全局槽位管理和指数退避策略。"""
+341:    async def async_ensure_connected(self) -> None:
+342:        """没有可连接的 BLEDevice（可能超出范围或没有可连接的扫描器）。"""
 ```
 
-**状态**: 未修复
+**结论**: 行号引用错误，但注释本身是正确的。
+
+**状态**: 部分误报（行号错误，注释正确）
 
 ---
 
@@ -646,17 +610,24 @@ tests/
 ### 8.1 【P2】README.md中提到的功能未实现
 
 **问题描述**:
-README.md第59行提到"RSSI 阈值"和"超时阈值"配置选项，但：
+README.md第32-35行提到"RSSI 阈值"和"超时阈值"配置选项，但：
 - `const.py` 中未定义相应常量
 - `config_flow.py` 中未包含相应schema
 - 代码中未使用这些配置
 
-**影响**: 文档与实际功能不符
+**实际存在的配置项**（2026-02-06验证）：
+- `alarm_on_disconnect` - 断连报警（默认: False）
+- `maintain_connection` - 维持连接（默认: True）
+- `auto_reconnect` - 自动重连（默认: True）
+- `battery_poll_interval_min` - 电量轮询间隔（默认: **360分钟**，不是60分钟）
+
+**影响**: 文档与实际功能不符，误导用户
 
 **建议**:
-要么实现这些功能，要么从README中移除
+- 优先：从README.md中删除不存在配置项的描述
+- 次要：实现这些功能（如果需要）
 
-**状态**: 未修复
+**状态**: 部分已解决（P0文档修复中已更正用户文档）
 
 ---
 
@@ -766,27 +737,28 @@ manifest.json 缺少 2025 年 Home Assistant 要求的 `config_flow` 和 `integr
 
 ---
 
-## 优先级修复建议
+## 优先级修复建议（更新于 2026-02-06）
 
-### 立即修复（P0）
-1. 修复device.py第352-358行缩进错误（2.1）
-2. 清理项目根目录的混乱文件（1.1）
+### 已解决问题（无需操作）
+1. ~~项目根目录混乱文件~~（1.1）- 已移至archive/目录
+2. ~~custom_components目录zip文件~~（1.2）- 误报，文件不存在
+3. ~~缺失strings.json~~（1.3）- 已在v1.0.0实现
+4. ~~device.py第352-358行缩进错误~~（2.1）- 误报，缩进正确
+5. ~~manifest.json字段~~（10.1）- 已在v1.0.0修复
 
 ### 尽快修复（P1）
-1. 移除custom_components目录下的zip文件（1.2）
-2. 添加strings.json本地化文件（1.3）
-3. 移除重复的import语句（2.2）
-4. 提取重复的连接失败处理逻辑（2.4）
-5. 修复连接槽位泄漏问题（3.1）
-6. 添加GATT锁超时机制（3.2）
-7. 修复锁死锁风险（5.1）
-8. ~~补全manifest.json字段（10.1）~~  已在 v1.0.0 修复
+1. 移除重复的import语句（2.2）
+2. 提取重复的连接失败处理逻辑（2.4）
+3. 修复连接槽位泄漏问题（3.1）
+4. 添加GATT锁超时机制（3.2）
+5. 修复锁死锁风险（5.1）
+6. 更正README.md中未实现功能的描述（8.1）
 
 ### 建议修复（P2-P3）
-1. 重构device.py文件（2.3）
+1. 重构device.py文件（2.3）- 当前761行，拆分为多个模块
 2. 改进错误处理和边界条件检查
-3. 添加类型注解
-4. 补充单元测试
+3. 添加完整的类型注解
+4. 补充单元测试（目标覆盖率60%+）
 5. 改进文档一致性
 
 ---

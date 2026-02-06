@@ -192,7 +192,7 @@ A: 检查以下几点：
 
 ## 七、参考资源
 
-- **KT6368A 硬件文档**：`docs/reference/kt6368a-hardware.md`
-- **KT6368A 固件文档**：`docs/reference/kt6368a-firmware.md`
-- **架构设计**：`docs/technical/architecture.md`
-- **故障排除**：`docs/user/troubleshooting.md`
+- **KT6368A 硬件文档**：`docs/参考资料/KT6368A硬件文档.md`
+- **KT6368A 固件文档**：`docs/参考资料/KT6368A固件文档.md`
+- **架构设计**：`docs/技术文档/系统架构设计.md`
+- **故障排除**：`docs/用户文档/故障排除.md`

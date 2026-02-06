@@ -16,6 +16,7 @@ eggs/
 .eggs/
 lib/
 lib64/
+
 parts/
 sdist/
 var/
@@ -154,4 +155,3 @@ anti_loss_tag_v2/
 *.zip
 *.pdf
 *.java
-KT6368A*.md
