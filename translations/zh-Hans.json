@@ -1,0 +1,36 @@
+{
+  "config": {
+    "abort": {
+      "not_connectable": "设备不可连接",
+      "no_discovery_info": "没有发现信息"
+    },
+    "step": {
+      "confirm": {
+        "title": "确认添加设备",
+        "data": {
+          "confirm": "确认添加"
+        }
+      },
+      "user": {
+        "title": "手动添加设备",
+        "data": {
+          "address": "蓝牙地址",
+          "name": "名称"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "选项",
+        "data": {
+          "alarm_on_disconnect": "断连时报警",
+          "maintain_connection": "保持连接",
+          "auto_reconnect": "自动重连",
+          "battery_poll_interval_min": "电量轮询间隔（分钟）"
+        }
+      }
+    }
+  }
+}
