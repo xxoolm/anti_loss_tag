@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -160,7 +162,9 @@ class AntiLossTagDevice:
 
     @property
     def battery_poll_interval_min(self) -> int:
-        return self._opt_int(CONF_BATTERY_POLL_INTERVAL_MIN, DEFAULT_BATTERY_POLL_INTERVAL_MIN)
+        return self._opt_int(
+            CONF_BATTERY_POLL_INTERVAL_MIN, DEFAULT_BATTERY_POLL_INTERVAL_MIN
+        )
 
     # -------------------------
     # Lifecycle
@@ -219,7 +223,9 @@ class AntiLossTagDevice:
             self._ensure_connect_task()
         else:
             # If not maintaining, best-effort short connect to sync policy
-            await self.async_set_disconnect_alarm_policy(self.alarm_on_disconnect, force_connect=True)
+            await self.async_set_disconnect_alarm_policy(
+                self.alarm_on_disconnect, force_connect=True
+            )
 
         # Battery task interval changed, restart loop task
         self._ensure_battery_task(restart=True)
@@ -246,7 +252,9 @@ class AntiLossTagDevice:
         return _remove
 
     @callback
-    def async_add_button_listener(self, listener: Callable[[ButtonEvent], None]) -> Callable[[], None]:
+    def async_add_button_listener(
+        self, listener: Callable[[ButtonEvent], None]
+    ) -> Callable[[], None]:
         self._button_listeners.add(listener)
 
         @callback
@@ -334,7 +342,6 @@ class AntiLossTagDevice:
         """没有可连接的 BLEDevice（可能超出范围或没有可连接的扫描器）。"""
         async with self._connect_lock:
             # ====== 连接退避：避免多设备同时冲连接 ======
-            import time
             now_ts = time.time()
             if now_ts < self._cooldown_until_ts:
                 return
@@ -349,11 +356,11 @@ class AntiLossTagDevice:
                 self._connected = False
                 self._client = None
 
-            # ====== 主动断开：归还全局连接槽位 ======
-            if self._conn_mgr is not None and self._conn_slot_acquired:
-                await self._conn_mgr.release()
-                self._conn_slot_acquired = False
-            # ====== 结束 ======
+                # ====== 主动断开：归还全局连接槽位 ======
+                if self._conn_mgr is not None and self._conn_slot_acquired:
+                    await self._conn_mgr.release()
+                    self._conn_slot_acquired = False
+                # ====== 结束 ======
                 self._async_dispatch_update()
                 return
 
@@ -362,10 +369,11 @@ class AntiLossTagDevice:
                 acq = await self._conn_mgr.acquire(timeout=20.0)
                 if not acq.acquired:
                     self._connect_fail_count = min(self._connect_fail_count + 1, 6)
-                    backoff = min(30, (2 ** self._connect_fail_count))
-                    import time
+                    backoff = min(30, (2**self._connect_fail_count))
                     self._cooldown_until_ts = time.time() + backoff
-                    self._last_error = f"等待连接槽位中({acq.reason}); {backoff}s 后重试"
+                    self._last_error = (
+                        f"等待连接槽位中({acq.reason}); {backoff}s 后重试"
+                    )
                     self._connected = False
                     self._client = None
                     self._async_dispatch_update()
@@ -381,14 +389,20 @@ class AntiLossTagDevice:
                     disconnected_callback=self._on_disconnect,
                     ble_device_callback=self._ble_device_callback,
                 )
-            except (BleakOutOfConnectionSlotsError, BleakNotFoundError, BleakAbortedError, BleakConnectionError) as err:
+            except (
+                BleakOutOfConnectionSlotsError,
+                BleakNotFoundError,
+                BleakAbortedError,
+                BleakConnectionError,
+            ) as err:
                 # ====== 连接失败：归还全局连接槽位 + 退避 ======
                 if self._conn_mgr is not None and self._conn_slot_acquired:
                     await self._conn_mgr.release()
                     self._conn_slot_acquired = False
                 self._connect_fail_count = min(self._connect_fail_count + 1, 6)
-                backoff = min(60, (2 ** self._connect_fail_count))
+                backoff = min(60, (2**self._connect_fail_count))
                 import time
+
                 self._cooldown_until_ts = time.time() + backoff
                 # ====== 结束 ======
                 self._last_error = f"连接失败: {err}"
@@ -421,8 +435,9 @@ class AntiLossTagDevice:
                     await self._conn_mgr.release()
                     self._conn_slot_acquired = False
                 self._connect_fail_count = min(self._connect_fail_count + 1, 6)
-                backoff = min(60, (2 ** self._connect_fail_count))
+                backoff = min(60, (2**self._connect_fail_count))
                 import time
+
                 self._cooldown_until_ts = time.time() + backoff
                 # ====== 结束 ======
                 self._last_error = f"服务发现失败: {err}"
@@ -438,7 +453,9 @@ class AntiLossTagDevice:
             await self._async_enable_notifications()
 
             # Sync disconnect alarm policy (FFE2) best-effort
-            await self.async_set_disconnect_alarm_policy(self.alarm_on_disconnect, force_connect=False)
+            await self.async_set_disconnect_alarm_policy(
+                self.alarm_on_disconnect, force_connect=False
+            )
 
             # Read battery once on connect (best-effort)
             await self.async_read_battery(force_connect=False)
@@ -509,7 +526,11 @@ class AntiLossTagDevice:
             return None
 
         cu = self._normalize_uuid(char_uuid)
-        psu = self._normalize_uuid(preferred_service_uuid) if preferred_service_uuid else None
+        psu = (
+            self._normalize_uuid(preferred_service_uuid)
+            if preferred_service_uuid
+            else None
+        )
 
         matches: list[tuple[str, object]] = []
         for svc in services:
@@ -570,21 +591,33 @@ class AntiLossTagDevice:
     # GATT operations
     # -------------------------
     async def async_start_alarm(self) -> None:
-        char = self._alert_level_handle if self._alert_level_handle is not None else UUID_ALERT_LEVEL_2A06
+        char = (
+            self._alert_level_handle
+            if self._alert_level_handle is not None
+            else UUID_ALERT_LEVEL_2A06
+        )
         await self._async_write_bytes(char, bytes([0x01]), prefer_response=False)
 
     async def async_stop_alarm(self) -> None:
-        char = self._alert_level_handle if self._alert_level_handle is not None else UUID_ALERT_LEVEL_2A06
+        char = (
+            self._alert_level_handle
+            if self._alert_level_handle is not None
+            else UUID_ALERT_LEVEL_2A06
+        )
         await self._async_write_bytes(char, bytes([0x00]), prefer_response=False)
 
-    async def async_set_disconnect_alarm_policy(self, enabled: bool, force_connect: bool) -> None:
+    async def async_set_disconnect_alarm_policy(
+        self, enabled: bool, force_connect: bool
+    ) -> None:
         value = bytes([0x01 if enabled else 0x00])
         if self._client is None and force_connect:
             await self.async_ensure_connected()
             # If user does not want to maintain connection, disconnect afterwards
             if not self.maintain_connection:
                 try:
-                    await self._async_write_bytes(UUID_WRITE_FFE2, value, prefer_response=True)
+                    await self._async_write_bytes(
+                        UUID_WRITE_FFE2, value, prefer_response=True
+                    )
                 finally:
                     await self.async_disconnect()
                 return
@@ -603,12 +636,18 @@ class AntiLossTagDevice:
             if client is None:
                 return
             try:
-                char = self._battery_level_handle if self._battery_level_handle is not None else UUID_BATTERY_LEVEL_2A19
+                char = (
+                    self._battery_level_handle
+                    if self._battery_level_handle is not None
+                    else UUID_BATTERY_LEVEL_2A19
+                )
                 # ====== 多特征同 UUID：电量读取按 handle 重试 ======
                 try:
                     data = await client.read_gatt_char(char)
                 except BleakError as err:
-                    if isinstance(char, str) and "Multiple Characteristics with this UUID" in str(err):
+                    if isinstance(
+                        char, str
+                    ) and "Multiple Characteristics with this UUID" in str(err):
                         try:
                             await client.get_services()
                         except Exception:
@@ -638,7 +677,9 @@ class AntiLossTagDevice:
                 self._last_error = f"读取电量失败（异常）: {err}"
                 self._async_dispatch_update()
 
-    async def _async_write_bytes(self, uuid: str | int, data: bytes, prefer_response: bool) -> None:
+    async def _async_write_bytes(
+        self, uuid: str | int, data: bytes, prefer_response: bool
+    ) -> None:
         if self._client is None:
             # If we maintain connection, schedule connect then retry once
             if self.maintain_connection:
@@ -657,15 +698,23 @@ class AntiLossTagDevice:
             # ====== 多特征同 UUID：按 handle 重试（兼容 bleak 报错） ======
             async def _resolve_handle_for_uuid(u: str) -> int | None:
                 # 2A06（报警）通常在 1802 Immediate Alert 服务下；其余默认不限定服务
-                preferred = _UUID_SERVICE_IMMEDIATE_ALERT_1802 if u.lower() == UUID_ALERT_LEVEL_2A06.lower() else None
-                return self._resolve_char_handle(u, preferred_service_uuid=preferred, require_write=True)
+                preferred = (
+                    _UUID_SERVICE_IMMEDIATE_ALERT_1802
+                    if u.lower() == UUID_ALERT_LEVEL_2A06.lower()
+                    else None
+                )
+                return self._resolve_char_handle(
+                    u, preferred_service_uuid=preferred, require_write=True
+                )
 
             async def _write_with_possible_handle_retry(resp: bool) -> None:
                 try:
                     await client.write_gatt_char(uuid, data, response=resp)
                     return
                 except BleakError as err:
-                    if isinstance(uuid, str) and "Multiple Characteristics with this UUID" in str(err):
+                    if isinstance(
+                        uuid, str
+                    ) and "Multiple Characteristics with this UUID" in str(err):
                         try:
                             await client.get_services()
                         except Exception:
@@ -675,6 +724,7 @@ class AntiLossTagDevice:
                             await client.write_gatt_char(handle, data, response=resp)
                             return
                     raise
+
             # ====== 结束 ======
 
             # Try preferred response mode first, then fallback
@@ -696,11 +746,14 @@ class AntiLossTagDevice:
             try:
                 # ====== 抖动（避免多设备同时轮询） ======
                 import random
+
                 base = self.battery_poll_interval_min * 60
                 jitter = random.randint(0, 30)  # 0~30s
                 await asyncio.sleep(base + jitter)
                 # ====== 结束 ======
-                await self.async_read_battery(force_connect=not self.maintain_connection)
+                await self.async_read_battery(
+                    force_connect=not self.maintain_connection
+                )
             except asyncio.CancelledError:
                 return
             except Exception as err:
