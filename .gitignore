@@ -149,3 +149,9 @@ Thumbs.db
 # Project specific
 anti_loss_tag_v1/
 anti_loss_tag_v2/
+anti_loss_tag_v1/
+anti_loss_tag_v2/
+*.zip
+*.pdf
+*.java
+KT6368A*.md
