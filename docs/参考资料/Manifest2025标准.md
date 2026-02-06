@@ -172,7 +172,7 @@
 -  配置流程
 -  manifest.json 完整
 -  详细错误处理
--  代码审查（`docs/technical/code-review.md`）
+-  代码审查（`docs/技术文档/Python代码审查.md`）
 
 ### 7.2 Silver 级别（推荐目标）
 
@@ -322,6 +322,6 @@ A:
 ---
 
 **相关文档**：
-- **开发规范**：`docs/technical/development.md`
-- **架构设计**：`docs/technical/architecture.md`
-- **BLE 协议**：`docs/technical/ble-protocol.md`
+- **开发规范**：`docs/技术文档/开发规范.md`
+- **架构设计**：`docs/技术文档/系统架构设计.md`
+- **BLE 协议**：`docs/技术文档/BLE协议规范.md`
