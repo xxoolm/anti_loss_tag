@@ -718,9 +718,15 @@ async def async_ensure_connected(self) -> None:
 
 ## 十、Home Assistant集成规范
 
-### 10.1 【P1】manifest.json缺少必要字段
+### 10.1 【P1】manifest.json缺少必要字段  已在 v1.0.0 修复
 
-**问题描述**:
+**问题描述（已解决）**:
+本问题在代码审查时发现，已在 v1.0.0 版本中修复。
+
+**原始问题**:
+manifest.json 缺少 2025 年 Home Assistant 要求的 `config_flow` 和 `integration_type` 字段，且 `iot_class` 使用了 `local_polling` 而非更准确的 `local_push`。
+
+**当前状态（v1.0.0）**:
 ```json
 {
   "domain": "anti_loss_tag",
@@ -730,29 +736,21 @@ async def async_ensure_connected(self) -> None:
   "issue_tracker": "https://gitaa.com/MMMM/anti_loss_tag/issues",
   "codeowners": ["@MMMM"],
   "requirements": ["bleak-retry-connector>=3.0.0"],
-  "iot_class": "local_polling"
-}
-```
-
-缺少 `config_flow` 和 `integration_type` 字段。
-
-**建议**:
-```json
-{
-  "domain": "anti_loss_tag",
-  "name": "BLE 防丢标签",
-  "version": "1.0.0",
-  "documentation": "https://gitaa.com/MMMM/anti_loss_tag",
-  "issue_tracker": "https://gitaa.com/MMMM/anti_loss_tag/issues",
-  "codeowners": ["@MMMM"],
-  "requirements": ["bleak-retry-connector>=3.0.0"],
-  "iot_class": "local_polling",
+  "iot_class": "local_push",
   "config_flow": true,
-  "integration_type": "device"
+  "integration_type": "device",
+  "dependencies": ["bluetooth_adapters"]
 }
 ```
 
-**状态**: 未修复
+**修复说明**:
+-  添加 `config_flow: true` - 符合2025年标准
+-  添加 `integration_type: "device"` - 必需字段，表示提供单个设备支持
+-  更新 `iot_class: "local_push"` - 更准确反映设备主动推送通知的特性
+-  添加 `dependencies: ["bluetooth_adapters"]` - 符合BLE集成最佳实践
+-  包含 bluetooth matcher - 正确配置BLE服务UUID和可连接属性
+
+**状态**: 已在 v1.0.0 修复 
 
 ---
 
@@ -782,7 +780,7 @@ async def async_ensure_connected(self) -> None:
 5. 修复连接槽位泄漏问题（3.1）
 6. 添加GATT锁超时机制（3.2）
 7. 修复锁死锁风险（5.1）
-8. 补全manifest.json字段（10.1）
+8. ~~补全manifest.json字段（10.1）~~  已在 v1.0.0 修复
 
 ### 建议修复（P2-P3）
 1. 重构device.py文件（2.3）
