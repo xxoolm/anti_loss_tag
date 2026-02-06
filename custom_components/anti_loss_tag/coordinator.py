@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -24,9 +26,13 @@ from .const import (
     DEFAULT_BATTERY_CACHE_SECONDS,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 @dataclass
 class BleTagData:
+    """Coordinator state payload for one BLE tag."""
+
     address: str
     name: str
     rssi: int | None = None
@@ -38,20 +44,21 @@ class BleTagData:
 
 
 class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry):
+    """Track BLE advertisements and lightweight device operations."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize coordinator for one config entry."""
         self.hass = hass
         self.entry = entry
         self.address = entry.data[CONF_ADDRESS]
         self.name = entry.data.get(CONF_NAME, "BLE 标签")
 
-        import logging
         super().__init__(
             hass,
             logger=logging.getLogger(__name__),
             name=f"{DOMAIN}-{self.address}",
             update_interval=None,
         )
-
 
         self.ble = BleTagBle(hass, self.address)
         self._unsub_adv = None
@@ -63,7 +70,10 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
         )
 
     async def async_start(self) -> None:
-        matcher = BluetoothCallbackMatcher(address=self.address, service_uuid=SERVICE_UUID_FFE0)
+        """Start advertisement listener and publish initial state."""
+        matcher = BluetoothCallbackMatcher(
+            address=self.address, service_uuid=SERVICE_UUID_FFE0
+        )
 
         self._unsub_adv = bluetooth.async_register_callback(
             self.hass,
@@ -76,26 +86,28 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
         self.async_set_updated_data(self._recalc_online(self.data))
 
     async def async_stop(self) -> None:
+        """Stop advertisement listener."""
         if self._unsub_adv is not None:
             self._unsub_adv()
             self._unsub_adv = None
 
     @callback
     def _adv_callback(self, service_info: BluetoothServiceInfoBleak, change) -> None:
+        """Update RSSI and last_seen from BLE advertisement callback."""
         now = dt_util.utcnow()
         d = self.data
         d.rssi = service_info.rssi
         d.last_seen = now.isoformat()
         self.async_set_updated_data(self._recalc_online(d))
 
-
-
     def _recalc_online(self, d: BleTagData) -> BleTagData:
+        """Recalculate online flag from last_seen and timeout."""
         timeout = timedelta(seconds=DEFAULT_ONLINE_TIMEOUT_SECONDS)
         if d.last_seen:
             try:
                 last = dt_util.parse_datetime(d.last_seen)
-            except Exception:
+            except (ValueError, TypeError) as err:
+                _LOGGER.debug("Failed to parse datetime: %s", err)
                 last = None
             if last:
                 d.online = (dt_util.utcnow() - last) <= timeout
@@ -106,9 +118,7 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
         return d
 
     async def async_refresh_battery(self, force: bool = False) -> None:
-        """
-        电量读取需要连接 GATT，比较“重”，这里做缓存。
-        """
+        """Refresh battery via GATT, honoring cache unless forced."""
         now_ts = dt_util.utcnow().timestamp()
         d = self.data
 
@@ -123,18 +133,15 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
             self.async_set_updated_data(self._recalc_online(d))
 
     async def async_set_disconnect_alarm(self, enabled: bool) -> None:
+        """Write disconnect alarm policy to device and update state."""
         await self.ble.write_disconnect_alarm(enabled)
         d = self.data
         d.disconnect_alarm = enabled
         self.async_set_updated_data(self._recalc_online(d))
 
     async def async_ring(self, seconds: int = 2) -> None:
+        """Ring device for the given duration in seconds."""
         await self.ble.write_alert_level(True)
-        await self.hass.async_add_executor_job(lambda: None)
-        await self.hass.async_add_executor_job(lambda: None)
-
-        # 用 HA 的 async sleep（避免阻塞）
-        import asyncio
         await asyncio.sleep(max(1, int(seconds)))
 
         await self.ble.write_alert_level(False)

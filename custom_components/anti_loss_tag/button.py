@@ -1,20 +1,19 @@
 from __future__ import annotations
 
+from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.components.button import ButtonEntity
-from homeassistant.const import EntityCategory
 
-from .const import DOMAIN
 from .device import AntiLossTagDevice
+from .entity_mixin import AntiLossTagEntityMixin
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    device: AntiLossTagDevice = hass.data[DOMAIN][entry.entry_id]
+    device: AntiLossTagDevice = entry.runtime_data
     async_add_entities(
         [
             AntiLossTagStartAlarmButton(device),
@@ -24,7 +23,8 @@ async def async_setup_entry(
     )
 
 
-class _AntiLossTagButtonBase(ButtonEntity):
+class _AntiLossTagButtonBase(AntiLossTagEntityMixin, ButtonEntity):
+    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, device: AntiLossTagDevice) -> None:
@@ -40,24 +40,15 @@ class _AntiLossTagButtonBase(ButtonEntity):
             self._unsub = None
 
     @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev.address)},
-            name=self._dev.name,
-            manufacturer="未知",
-            model="BLE 防丢标签",
-        )
-
-    @property
     def available(self) -> bool:
-        # We allow pressing even if not connected; device will connect as needed
+        # Allow press even if not connected; device connects on demand
         return self._dev.available or self._dev.connected
 
 
 class AntiLossTagStartAlarmButton(_AntiLossTagButtonBase):
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = f"{device.name} 开始报警"
+        self._attr_name = "Start Alarm"
         self._attr_unique_id = f"{device.address}_start_alarm"
 
     async def async_press(self) -> None:
@@ -67,7 +58,7 @@ class AntiLossTagStartAlarmButton(_AntiLossTagButtonBase):
 class AntiLossTagStopAlarmButton(_AntiLossTagButtonBase):
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = f"{device.name} 停止报警"
+        self._attr_name = "Stop Alarm"
         self._attr_unique_id = f"{device.address}_stop_alarm"
 
     async def async_press(self) -> None:

@@ -7,8 +7,11 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import cast
 
+from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
+from bleak.backends.characteristic import BleakGATTCharacteristic
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -39,6 +42,7 @@ from .const import (
     UUID_NOTIFY_FFE1,
     UUID_WRITE_FFE2,
 )
+from .connection_manager import BleConnectionManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +83,10 @@ class AntiLossTagDevice:
         self._cancel_bt_callback: Callable[[], None] | None = None
         self._cancel_unavailable: Callable[[], None] | None = None
 
+        # ====== GATT特征缓存（从device/gatt_operations.py集成） ======
+        # 缓存BleakGATTCharacteristic对象，避免重复UUID查找
+        self._cached_chars: dict[str, BleakGATTCharacteristic] = {}
+
         self._listeners: set[Callable[[], None]] = set()
         self._button_listeners: set[Callable[[ButtonEvent], None]] = set()
 
@@ -89,8 +97,12 @@ class AntiLossTagDevice:
 
         # ====== 多设备并发连接控制（全局连接槽位 + 退避） ======
         try:
-            self._conn_mgr = self.hass.data[DOMAIN].get("_conn_mgr")
-        except Exception:  # noqa: BLE001
+            self._conn_mgr: BleConnectionManager | None = cast(
+                BleConnectionManager | None,
+                self.hass.data[DOMAIN].get("_conn_mgr"),
+            )
+        except (KeyError, AttributeError) as err:
+            _LOGGER.debug("Connection manager not available: %s", err)
             self._conn_mgr = None
 
         self._conn_slot_acquired: bool = False
@@ -317,18 +329,38 @@ class AntiLossTagDevice:
         if self._battery_task is None or self._battery_task.done():
             self._battery_task = self.hass.async_create_task(self._async_battery_loop())
 
-    def _ble_device_callback(self):
+    def _ble_device_callback(self) -> BLEDevice | None:
         return bluetooth.async_ble_device_from_address(
             self.hass, self.address, connectable=True
         )
 
+    async def _release_connection_slot(self) -> None:
+        """Release global connection slot if acquired."""
+        if self._conn_mgr is not None and self._conn_slot_acquired:
+            await self._conn_mgr.release()
+            self._conn_slot_acquired = False
+
+    def _release_connection_slot_soon(self) -> None:
+        """Release connection slot from non-async callback context."""
+        if self._conn_mgr is not None and self._conn_slot_acquired:
+            self._conn_slot_acquired = False
+            self.hass.async_create_task(self._release_connection_slot())
+
+    def _apply_connect_backoff(self, *, max_backoff: int) -> int:
+        """Increase failure count and apply exponential cooldown."""
+        self._connect_fail_count = min(self._connect_fail_count + 1, 6)
+        backoff = min(max_backoff, (2**self._connect_fail_count))
+        self._cooldown_until_ts = time.time() + backoff
+        return backoff
+
     def _on_disconnect(self, _client) -> None:
         self._connected = False
 
+        # ====== 清除特征缓存（断开连接后缓存失效） ======
+        self._cached_chars.clear()
+
         # ====== 断开：归还全局连接槽位 ======
-        if self._conn_mgr is not None and self._conn_slot_acquired:
-            self.hass.async_create_task(self._conn_mgr.release())
-            self._conn_slot_acquired = False
+        self._release_connection_slot_soon()
         # ====== 结束 ======
         self._client = None
         self._alert_level_handle = None
@@ -357,9 +389,7 @@ class AntiLossTagDevice:
                 self._client = None
 
                 # ====== 主动断开：归还全局连接槽位 ======
-                if self._conn_mgr is not None and self._conn_slot_acquired:
-                    await self._conn_mgr.release()
-                    self._conn_slot_acquired = False
+                await self._release_connection_slot()
                 # ====== 结束 ======
                 self._async_dispatch_update()
                 return
@@ -368,9 +398,7 @@ class AntiLossTagDevice:
             if self._conn_mgr is not None and not self._conn_slot_acquired:
                 acq = await self._conn_mgr.acquire(timeout=20.0)
                 if not acq.acquired:
-                    self._connect_fail_count = min(self._connect_fail_count + 1, 6)
-                    backoff = min(30, (2**self._connect_fail_count))
-                    self._cooldown_until_ts = time.time() + backoff
+                    backoff = self._apply_connect_backoff(max_backoff=30)
                     self._last_error = (
                         f"等待连接槽位中({acq.reason}); {backoff}s 后重试"
                     )
@@ -396,21 +424,18 @@ class AntiLossTagDevice:
                 BleakConnectionError,
             ) as err:
                 # ====== 连接失败：归还全局连接槽位 + 退避 ======
-                if self._conn_mgr is not None and self._conn_slot_acquired:
-                    await self._conn_mgr.release()
-                    self._conn_slot_acquired = False
-                self._connect_fail_count = min(self._connect_fail_count + 1, 6)
-                backoff = min(60, (2**self._connect_fail_count))
-                import time
-
-                self._cooldown_until_ts = time.time() + backoff
+                await self._release_connection_slot()
+                backoff = self._apply_connect_backoff(max_backoff=60)
                 # ====== 结束 ======
                 self._last_error = f"连接失败: {err}"
                 self._connected = False
                 self._client = None
                 self._async_dispatch_update()
                 return
-            except Exception as err:  # safety net
+            except (BleakError, TimeoutError, OSError) as err:
+                # Safety net for other connection errors
+                await self._release_connection_slot()
+                self._apply_connect_backoff(max_backoff=60)
                 self._last_error = f"连接失败（异常）: {err}"
                 self._connected = False
                 self._client = None
@@ -429,16 +454,10 @@ class AntiLossTagDevice:
             # Ensure services are discovered
             try:
                 await client.get_services()
-            except Exception as err:
+            except BleakError as err:
                 # ====== 连接失败：归还全局连接槽位 + 退避 ======
-                if self._conn_mgr is not None and self._conn_slot_acquired:
-                    await self._conn_mgr.release()
-                    self._conn_slot_acquired = False
-                self._connect_fail_count = min(self._connect_fail_count + 1, 6)
-                backoff = min(60, (2**self._connect_fail_count))
-                import time
-
-                self._cooldown_until_ts = time.time() + backoff
+                await self._release_connection_slot()
+                backoff = self._apply_connect_backoff(max_backoff=60)
                 # ====== 结束 ======
                 self._last_error = f"服务发现失败: {err}"
                 self._async_dispatch_update()
@@ -446,7 +465,7 @@ class AntiLossTagDevice:
             # Resolve duplicated characteristic UUIDs to unique handles (best-effort)
             try:
                 self._resolve_gatt_handles()
-            except Exception as err:
+            except (AttributeError, TypeError, ValueError) as err:
                 _LOGGER.debug("Resolve GATT handles failed: %s", err)
 
             # Enable notifications (FFE1) best-effort
@@ -469,7 +488,8 @@ class AntiLossTagDevice:
             try:
                 try:
                     await self._client.stop_notify(UUID_NOTIFY_FFE1)
-                except Exception:
+                except BleakError:
+                    # stop_notify may fail if already disconnected
                     pass
                 await self._client.disconnect()
             finally:
@@ -500,9 +520,6 @@ class AntiLossTagDevice:
         except BleakError as err:
             self._last_error = f"开启通知(FFE1)失败: {err}"
             self._async_dispatch_update()
-        except Exception as err:
-            self._last_error = f"开启通知(FFE1)失败（异常）: {err}"
-            self._async_dispatch_update()
 
     # -------------------------
     # Characteristic handle resolution
@@ -517,6 +534,10 @@ class AntiLossTagDevice:
         preferred_service_uuid: str | None = None,
         require_write: bool = False,
     ) -> int | None:
+        """解析特征handle，使用缓存提高性能。
+
+        集成自device/gatt_operations.py的特征缓存机制。
+        """
         client = self._client
         if client is None:
             return None
@@ -526,6 +547,13 @@ class AntiLossTagDevice:
             return None
 
         cu = self._normalize_uuid(char_uuid)
+
+        # ====== 特征缓存：先检查缓存 ======
+        if cu in self._cached_chars:
+            ch = self._cached_chars[cu]
+            handle = getattr(ch, "handle", None)
+            if handle is not None:
+                return handle
         psu = (
             self._normalize_uuid(preferred_service_uuid)
             if preferred_service_uuid
@@ -562,7 +590,7 @@ class AntiLossTagDevice:
             for svc_uuid, ch in matches:
                 try:
                     handles.append((svc_uuid, int(getattr(ch, "handle"))))
-                except Exception:
+                except (AttributeError, TypeError, ValueError):
                     handles.append((svc_uuid, None))
             _LOGGER.warning(
                 "Multiple characteristics for UUID %s; selecting the first by handle. Candidates=%s",
@@ -571,8 +599,14 @@ class AntiLossTagDevice:
             )
 
         try:
-            return int(getattr(matches[0][1], "handle"))
-        except Exception:
+            ch = matches[0][1]
+            handle = int(getattr(ch, "handle"))
+
+            # ====== 缓存特征对象（集成自device/gatt_operations.py） ======
+            self._cached_chars[cu] = ch
+
+            return handle
+        except (AttributeError, TypeError, ValueError):
             return None
 
     def _resolve_gatt_handles(self) -> None:
@@ -650,7 +684,7 @@ class AntiLossTagDevice:
                     ) and "Multiple Characteristics with this UUID" in str(err):
                         try:
                             await client.get_services()
-                        except Exception:
+                        except BleakError:
                             pass
                         handle = self._resolve_char_handle(
                             char,
@@ -673,8 +707,8 @@ class AntiLossTagDevice:
             except BleakError as err:
                 self._last_error = f"读取电量失败: {err}"
                 self._async_dispatch_update()
-            except Exception as err:
-                self._last_error = f"读取电量失败（异常）: {err}"
+            except (TimeoutError, OSError, asyncio.CancelledError) as err:
+                self._last_error = f"读取电量失败（超时或系统错误）: {err}"
                 self._async_dispatch_update()
 
     async def _async_write_bytes(
@@ -717,7 +751,7 @@ class AntiLossTagDevice:
                     ) and "Multiple Characteristics with this UUID" in str(err):
                         try:
                             await client.get_services()
-                        except Exception:
+                        except BleakError:
                             pass
                         handle = _resolve_handle_for_uuid(uuid)
                         if handle is not None:
@@ -731,12 +765,12 @@ class AntiLossTagDevice:
             try:
                 await _write_with_possible_handle_retry(prefer_response)
                 return
-            except Exception:
+            except (BleakError, TimeoutError, OSError):
                 pass
 
             try:
                 await _write_with_possible_handle_retry(not prefer_response)
-            except Exception as err:
+            except (BleakError, TimeoutError, OSError) as err:
                 self._last_error = f"写入 {uuid} 失败: {err}"
                 self._async_dispatch_update()
                 raise
@@ -745,8 +779,6 @@ class AntiLossTagDevice:
         while True:
             try:
                 # ====== 抖动（避免多设备同时轮询） ======
-                import random
-
                 base = self.battery_poll_interval_min * 60
                 jitter = random.randint(0, 30)  # 0~30s
                 await asyncio.sleep(base + jitter)
@@ -756,6 +788,6 @@ class AntiLossTagDevice:
                 )
             except asyncio.CancelledError:
                 return
-            except Exception as err:
+            except (BleakError, TimeoutError, OSError) as err:
                 self._last_error = f"电量轮询异常: {err}"
                 self._async_dispatch_update()

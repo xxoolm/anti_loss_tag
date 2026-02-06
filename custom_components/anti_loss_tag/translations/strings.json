@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Scan for BLE devices",
+        "description": "Select your anti-loss tag from the list",
+        "data": {
+          "address": "Device Address",
+          "name": "Device Name"
+        }
+      },
+      "configure": {
+        "title": "Configure Device",
+        "description": "Configure your anti-loss tag settings",
+        "data": {
+          "alarm_on_disconnect": "Alarm on Disconnect",
+          "maintain_connection": "Maintain Connection",
+          "battery_poll_interval_min": "Battery Poll Interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to device",
+      "device_not_found": "Device not found",
+      "unknown": "Unknown error"
+    }
+  },
+  "title": "BLE Anti-Loss Tag"
+}
