@@ -1,30 +1,30 @@
 from __future__ import annotations
 
+from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.components.event import EventEntity, EventDeviceClass
 
-from .const import DOMAIN
 from .device import AntiLossTagDevice, ButtonEvent
+from .entity_mixin import AntiLossTagEntityMixin
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    device: AntiLossTagDevice = hass.data[DOMAIN][entry.entry_id]
+    device: AntiLossTagDevice = entry.runtime_data
     async_add_entities([AntiLossTagButtonEventEntity(device)], update_before_add=False)
 
 
-class AntiLossTagButtonEventEntity(EventEntity):
+class AntiLossTagButtonEventEntity(AntiLossTagEntityMixin, EventEntity):
+    _attr_has_entity_name = True
     _attr_device_class = EventDeviceClass.BUTTON
     _attr_event_types = ["press"]
 
     def __init__(self, device: AntiLossTagDevice) -> None:
         self._dev = device
         self._unsub_btn = None
-        self._attr_name = f"{device.name} 按键"
+        self._attr_name = "Button"
         self._attr_unique_id = f"{device.address}_button_event"
 
     async def async_added_to_hass(self) -> None:
@@ -35,16 +35,9 @@ class AntiLossTagButtonEventEntity(EventEntity):
             self._unsub_btn()
             self._unsub_btn = None
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev.address)},
-            name=self._dev.name,
-            manufacturer="未知",
-            model="BLE 防丢标签",
-        )
-
     @callback
     def _async_on_button(self, event: ButtonEvent) -> None:
-        self._trigger_event("press", {"raw_hex": event.raw.hex()})
+        self._trigger_event(
+            "press", {"entity_id": self.entity_id, "raw_hex": event.raw.hex()}
+        )
         self.async_write_ha_state()

@@ -30,7 +30,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN].setdefault("_conn_mgr", BleConnectionManager(max_connections=3))
 
     device = AntiLossTagDevice(hass=hass, entry=entry)
-    hass.data[DOMAIN][entry.entry_id] = device
+    entry.runtime_data = device
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -46,18 +46,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_update_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
-    device: AntiLossTagDevice = hass.data[DOMAIN][entry.entry_id]
+    device: AntiLossTagDevice = entry.runtime_data
     await device.async_apply_entry_options()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    device: AntiLossTagDevice = hass.data[DOMAIN][entry.entry_id]
+    device: AntiLossTagDevice = entry.runtime_data
     device.async_stop()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-
     return unload_ok

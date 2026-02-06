@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT, PERCENTAGE, EntityCategory
+from homeassistant.const import (
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    PERCENTAGE,
+    EntityCategory,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorEntity,
+    SensorDeviceClass,
+    SensorStateClass,
+)
 
-from .const import DOMAIN
 from .device import AntiLossTagDevice
+from .entity_mixin import AntiLossTagEntityMixin
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    device: AntiLossTagDevice = hass.data[DOMAIN][entry.entry_id]
+    device: AntiLossTagDevice = entry.runtime_data
     async_add_entities(
         [
             AntiLossTagRssiSensor(device, entry),
@@ -24,7 +31,9 @@ async def async_setup_entry(
     )
 
 
-class _AntiLossTagSensorBase(SensorEntity):
+class _AntiLossTagSensorBase(AntiLossTagEntityMixin, SensorEntity):
+    """Base class for AntiLossTag sensors."""
+
     def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
         self._dev = device
         self._entry = entry
@@ -38,15 +47,6 @@ class _AntiLossTagSensorBase(SensorEntity):
             self._unsub()
             self._unsub = None
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev.address)},
-            name=self._dev.name,
-            manufacturer="未知",
-            model="BLE 防丢标签",
-        )
-
 
 class AntiLossTagRssiSensor(_AntiLossTagSensorBase):
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
@@ -56,7 +56,7 @@ class AntiLossTagRssiSensor(_AntiLossTagSensorBase):
 
     def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
         super().__init__(device, entry)
-        self._attr_name = f"{device.name} 信号强度"
+        self._attr_name = "Signal Strength"
         self._attr_unique_id = f"{device.address}_rssi"
 
     @property
@@ -72,7 +72,7 @@ class AntiLossTagBatterySensor(_AntiLossTagSensorBase):
 
     def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
         super().__init__(device, entry)
-        self._attr_name = f"{device.name} 电量"
+        self._attr_name = "Battery"
         self._attr_unique_id = f"{device.address}_battery"
 
     @property

@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.components.binary_sensor import (
-    BinarySensorEntity,
-    BinarySensorDeviceClass,
-)
 
-from .const import DOMAIN
 from .device import AntiLossTagDevice
+from .entity_mixin import AntiLossTagEntityMixin
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    device: AntiLossTagDevice = hass.data[DOMAIN][entry.entry_id]
+    device: AntiLossTagDevice = entry.runtime_data
     async_add_entities(
         [
             AntiLossTagInRangeBinarySensor(device),
@@ -26,7 +25,9 @@ async def async_setup_entry(
     )
 
 
-class _AntiLossTagBinaryBase(BinarySensorEntity):
+class _AntiLossTagBinaryBase(AntiLossTagEntityMixin, BinarySensorEntity):
+    _attr_has_entity_name = True
+
     def __init__(self, device: AntiLossTagDevice) -> None:
         self._dev = device
         self._unsub = None
@@ -39,22 +40,13 @@ class _AntiLossTagBinaryBase(BinarySensorEntity):
             self._unsub()
             self._unsub = None
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev.address)},
-            name=self._dev.name,
-            manufacturer="未知",
-            model="BLE 防丢标签",
-        )
-
 
 class AntiLossTagInRangeBinarySensor(_AntiLossTagBinaryBase):
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = f"{device.name} 在范围内"
+        self._attr_name = "In Range"
         self._attr_unique_id = f"{device.address}_in_range"
 
     @property
@@ -67,7 +59,7 @@ class AntiLossTagConnectedBinarySensor(_AntiLossTagBinaryBase):
 
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = f"{device.name} 已连接"
+        self._attr_name = "Connected"
         self._attr_unique_id = f"{device.address}_connected"
 
     @property
