@@ -43,6 +43,15 @@ from .const import (
     UUID_WRITE_FFE2,
 )
 from .connection_manager import BleConnectionManager
+from .utils.constants import (
+    BATTERY_POLL_JITTER_SECONDS,
+    MIN_CONNECT_BACKOFF_SECONDS,
+    MAX_CONNECT_BACKOFF_SECONDS,
+    MAX_CONNECT_FAIL_COUNT,
+    DEFAULT_BLEAK_TIMEOUT,
+    CONNECTION_SLOT_ACQUIRE_TIMEOUT,
+    ENTITY_UPDATE_DEBOUNCE_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,6 +103,9 @@ class AntiLossTagDevice:
         self._battery_task: asyncio.Task | None = None
 
         self._last_error: str | None = None
+
+        # ====== 实体更新防抖动（避免频繁更新） ======
+        self._last_update_time: float = 0.0
 
         # ====== 多设备并发连接控制（全局连接槽位 + 退避） ======
         try:
@@ -277,6 +289,17 @@ class AntiLossTagDevice:
 
     @callback
     def _async_dispatch_update(self) -> None:
+        """Dispatch update to all listeners with debouncing."""
+        # ====== 防抖动（避免频繁更新） ======
+        now = time.time()
+        if now - self._last_update_time < ENTITY_UPDATE_DEBOUNCE_SECONDS:
+            _LOGGER.debug(
+                "Update debounced (last %.2fs ago)", now - self._last_update_time
+            )
+            return
+        self._last_update_time = now
+        # ====== 结束 ======
+
         for listener in list(self._listeners):
             listener()
 
@@ -341,31 +364,63 @@ class AntiLossTagDevice:
             self._conn_slot_acquired = False
 
     def _release_connection_slot_soon(self) -> None:
-        """Release connection slot from non-async callback context."""
+        """Release connection slot from non-async callback context.
+
+        This is called from synchronous callbacks (like _on_disconnect),
+        so we need to schedule the async release without blocking.
+        """
         if self._conn_mgr is not None and self._conn_slot_acquired:
             self._conn_slot_acquired = False
-            self.hass.async_create_task(self._release_connection_slot())
+            # 添加错误处理，防止任务创建失败导致槽位泄漏
+            try:
+                task = self.hass.async_create_task(self._release_connection_slot())
+
+                # 添加完成回调，捕获任务中的异常
+                def _task_done(t: asyncio.Task) -> None:
+                    try:
+                        t.exception()
+                    except Exception as err:
+                        _LOGGER.error("Error in slot release task: %s", err)
+
+                task.add_done_callback(_task_done)
+            except Exception as err:
+                _LOGGER.error("Failed to schedule slot release: %s", err)
 
     def _apply_connect_backoff(self, *, max_backoff: int) -> int:
         """Increase failure count and apply exponential cooldown."""
-        self._connect_fail_count = min(self._connect_fail_count + 1, 6)
+        self._connect_fail_count = min(
+            self._connect_fail_count + 1, MAX_CONNECT_FAIL_COUNT
+        )
         backoff = min(max_backoff, (2**self._connect_fail_count))
         self._cooldown_until_ts = time.time() + backoff
         return backoff
 
     def _on_disconnect(self, _client) -> None:
-        self._connected = False
+        """Handle disconnect callback from bleak.
 
-        # ====== 清除特征缓存（断开连接后缓存失效） ======
-        self._cached_chars.clear()
+        Note: This is a synchronous callback from bleak, running on a background thread.
+        All cleanup operations must be non-blocking.
+        """
+        try:
+            self._connected = False
 
-        # ====== 断开：归还全局连接槽位 ======
-        self._release_connection_slot_soon()
-        # ====== 结束 ======
-        self._client = None
-        self._alert_level_handle = None
-        self._battery_level_handle = None
-        self._async_dispatch_update()
+            # ====== 清除特征缓存（断开连接后缓存失效） ======
+            # 清理特征缓存（如果失败，记录错误但继续清理）
+            try:
+                self._cached_chars.clear()
+            except Exception as err:
+                _LOGGER.error("Error clearing characteristic cache: %s", err)
+        except Exception as err:
+            _LOGGER.error("Error in disconnect callback: %s", err)
+        finally:
+            # ====== 断开：归还全局连接槽位 ======
+            # 确保资源释放一定会执行
+            self._release_connection_slot_soon()
+            # ====== 结束 ======
+            self._client = None
+            self._alert_level_handle = None
+            self._battery_level_handle = None
+            self._async_dispatch_update()
 
         if self.auto_reconnect and self.maintain_connection:
             self._ensure_connect_task()
@@ -396,9 +451,13 @@ class AntiLossTagDevice:
 
             # ====== 获取全局连接槽位（跨设备并发控制） ======
             if self._conn_mgr is not None and not self._conn_slot_acquired:
-                acq = await self._conn_mgr.acquire(timeout=20.0)
+                acq = await self._conn_mgr.acquire(
+                    timeout=CONNECTION_SLOT_ACQUIRE_TIMEOUT
+                )
                 if not acq.acquired:
-                    backoff = self._apply_connect_backoff(max_backoff=30)
+                    backoff = self._apply_connect_backoff(
+                        max_backoff=MAX_CONNECT_BACKOFF_SECONDS // 2
+                    )
                     self._last_error = (
                         f"等待连接槽位中({acq.reason}); {backoff}s 后重试"
                     )
@@ -425,59 +484,18 @@ class AntiLossTagDevice:
             ) as err:
                 # ====== 连接失败：归还全局连接槽位 + 退避 ======
                 await self._release_connection_slot()
-                backoff = self._apply_connect_backoff(max_backoff=60)
-                # ====== 结束 ======
-                self._last_error = f"连接失败: {err}"
-                self._connected = False
-                self._client = None
-                self._async_dispatch_update()
-                return
-            except (BleakError, TimeoutError, OSError) as err:
-                # Safety net for other connection errors
-                await self._release_connection_slot()
-                self._apply_connect_backoff(max_backoff=60)
-                self._last_error = f"连接失败（异常）: {err}"
-                self._connected = False
-                self._client = None
-                self._async_dispatch_update()
-                return
+                backoff = self._apply_connect_backoff(
+                    max_backoff=MAX_CONNECT_BACKOFF_SECONDS
+                )
+            if self._conn_mgr is not None:
+                await self._conn_mgr.release()
+                self._conn_slot_acquired = False
+            raise
 
-            self._client = client
-            self._connected = True
-            # ====== 连接成功：重置退避 ======
-            self._connect_fail_count = 0
-            self._cooldown_until_ts = 0.0
-            # ====== 结束 ======
-            self._last_error = None
-            self._async_dispatch_update()
-
-            # Ensure services are discovered
-            try:
-                await client.get_services()
-            except BleakError as err:
-                # ====== 连接失败：归还全局连接槽位 + 退避 ======
-                await self._release_connection_slot()
-                backoff = self._apply_connect_backoff(max_backoff=60)
-                # ====== 结束 ======
-                self._last_error = f"服务发现失败: {err}"
-                self._async_dispatch_update()
-
-            # Resolve duplicated characteristic UUIDs to unique handles (best-effort)
-            try:
-                self._resolve_gatt_handles()
-            except (AttributeError, TypeError, ValueError) as err:
-                _LOGGER.debug("Resolve GATT handles failed: %s", err)
-
-            # Enable notifications (FFE1) best-effort
-            await self._async_enable_notifications()
-
-            # Sync disconnect alarm policy (FFE2) best-effort
-            await self.async_set_disconnect_alarm_policy(
-                self.alarm_on_disconnect, force_connect=False
-            )
-
-            # Read battery once on connect (best-effort)
-            await self.async_read_battery(force_connect=False)
+        backoff = self._apply_connect_backoff(max_backoff=MAX_CONNECT_BACKOFF_SECONDS)
+        self._last_error = f"服务发现失败: {err}"
+        self._async_dispatch_update()
+        raise
 
     async def async_disconnect(self) -> None:
         async with self._connect_lock:
@@ -780,14 +798,16 @@ class AntiLossTagDevice:
             try:
                 # ====== 抖动（避免多设备同时轮询） ======
                 base = self.battery_poll_interval_min * 60
-                jitter = random.randint(0, 30)  # 0~30s
+                jitter = random.randint(0, BATTERY_POLL_JITTER_SECONDS)
                 await asyncio.sleep(base + jitter)
                 # ====== 结束 ======
                 await self.async_read_battery(
                     force_connect=not self.maintain_connection
                 )
             except asyncio.CancelledError:
-                return
+                # 任务被取消，清理资源后重新抛出
+                _LOGGER.debug("Battery loop cancelled for %s", self.address)
+                raise
             except (BleakError, TimeoutError, OSError) as err:
                 self._last_error = f"电量轮询异常: {err}"
                 self._async_dispatch_update()

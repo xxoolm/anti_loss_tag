@@ -1,3 +1,17 @@
+"""弃用的 BLE 操作封装模块。
+
+此模块已被 device.py.AntiLossTagDevice 完全替代。
+保留此文件仅用于向后兼容。
+
+**请勿在新代码中使用此模块！**
+
+迁移指南：
+- BleTagBle → device.AntiLossTagDevice
+- 详见 archived/DEPRECATED.md
+
+弃用时间: 2025-02-08
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,65 +36,52 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
 DEFAULT_BLEAK_TIMEOUT: Final = 20.0
 
 
 class BleTagBle:
     """
-    统一封装 BLE GATT 操作，并发串行化（一个设备同一时间只允许一个 connect/read/write）。
+    [已弃用] 统一封装 BLE GATT 操作。
 
-    使用最佳实践：
-    - BleakClientWithServiceCache：缓存服务发现结果
-    - establish_connection：自动重试机制
-    - disconnected_callback：处理意外断开
+    **请使用 device.py.AntiLossTagDevice 替代**
+
+    此类已被完全替代，保留仅用于向后兼容。
+    所有功能已整合到 AntiLossTagDevice 中。
     """
 
     def __init__(self, hass: HomeAssistant, address: str) -> None:
-        """初始化 BLE 操作封装。
+        """[已弃用] 初始化 BLE 操作封装。
 
-        Args:
-            hass: Home Assistant 实例
-            address: BLE 设备地址
+        请使用 device.AntiLossTagDevice 代替。
         """
+        _LOGGER.warning(
+            "BleTagBle is deprecated. Use device.AntiLossTagDevice instead."
+        )
         self._hass = hass
         self._address = address
         self._lock = asyncio.Lock()
         self._disconnected = False
 
     def _on_disconnect(self, client: BleakClientWithServiceCache) -> None:
-        """处理意外断开连接回调。
-
-        Args:
-            client: 断开的客户端实例
-        """
+        """处理意外断开连接回调。"""
         self._disconnected = True
         _LOGGER.warning("Device %s disconnected unexpectedly", self._address)
 
     async def _get_device(self) -> BLEDevice:
-        """获取 BLE 设备对象。
-
-        Returns:
-            BLE 设备对象
-
-        Raises:
-            BleakConnectionError: 如果设备未找到
-        """
+        """获取 BLE 设备对象。"""
         dev = bluetooth.async_ble_device_from_address(self._hass, self._address)
         if dev is None:
             raise BleakConnectionError(f"Device {self._address} not found")
         return dev
 
     async def write_alert_level(self, on: bool) -> None:
-        """写入报警级别特征。
+        """[已弃用] 写入报警级别特征。
 
-        Args:
-            on: True 为开启报警，False 为关闭
-
-        Raises:
-            BleakConnectionError: 连接失败
-            BleakError: 写入失败
+        请使用 AntiLossTagDevice.async_start_alarm() 或 async_stop_alarm()
         """
+        _LOGGER.warning(
+            "write_alert_level is deprecated. Use async_start_alarm/async_stop_alarm"
+        )
         async with self._lock:
             dev = await self._get_device()
             try:
@@ -102,15 +103,13 @@ class BleTagBle:
                 raise
 
     async def write_disconnect_alarm(self, enabled: bool) -> None:
-        """写入断连报警特征。
+        """[已弃用] 写入断连报警特征。
 
-        Args:
-            enabled: True 为启用断连报警，False 为禁用
-
-        Raises:
-            BleakConnectionError: 连接失败
-            BleakError: 写入失败
+        请使用 AntiLossTagDevice.async_set_disconnect_alarm_policy()
         """
+        _LOGGER.warning(
+            "write_disconnect_alarm is deprecated. Use async_set_disconnect_alarm_policy"
+        )
         async with self._lock:
             dev = await self._get_device()
             try:
@@ -134,15 +133,11 @@ class BleTagBle:
                 raise
 
     async def read_battery(self) -> int | None:
-        """读取电池电量。
+        """[已弃用] 读取电池电量。
 
-        Returns:
-            电池电量百分比（0-100），如果读取失败则返回 None
-
-        Raises:
-            BleakConnectionError: 连接失败
-            BleakError: 读取失败
+        请使用 AntiLossTagDevice.async_read_battery()
         """
+        _LOGGER.warning("read_battery is deprecated. Use async_read_battery")
         async with self._lock:
             dev = await self._get_device()
             try:
