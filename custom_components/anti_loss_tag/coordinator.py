@@ -1,3 +1,17 @@
+"""弃用的协调器模块。
+
+此模块已被 device.py.AntiLossTagDevice 完全替代。
+保留此文件仅用于向后兼容。
+
+**请勿在新代码中使用此模块！**
+
+迁移指南：
+- BleTagCoordinator → device.AntiLossTagDevice
+- 详见 archived/DEPRECATED.md
+
+弃用时间: 2025-02-08
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -31,12 +45,12 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class BleTagData:
-    """Coordinator state payload for one BLE tag."""
+    """[已弃用] Coordinator 状态负载。"""
 
     address: str
     name: str
     rssi: int | None = None
-    last_seen: str | None = None  # ISO string
+    last_seen: str | None = None
     online: bool = False
     battery: int | None = None
     disconnect_alarm: bool = False
@@ -44,10 +58,18 @@ class BleTagData:
 
 
 class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
-    """Track BLE advertisements and lightweight device operations."""
+    """[已弃用] BLE 标签追踪协调器。
+
+    **请使用 device.AntiLossTagDevice 替代**
+
+    此类已被完全替代，保留仅用于向后兼容。
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize coordinator for one config entry."""
+        """[已弃用] 初始化协调器。"""
+        _LOGGER.warning(
+            "BleTagCoordinator is deprecated. Use device.AntiLossTagDevice instead."
+        )
         self.hass = hass
         self.entry = entry
         self.address = entry.data[CONF_ADDRESS]
@@ -70,7 +92,8 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
         )
 
     async def async_start(self) -> None:
-        """Start advertisement listener and publish initial state."""
+        """[已弃用] 启动广播监听器。"""
+        _LOGGER.warning("BleTagCoordinator.async_start is deprecated")
         matcher = BluetoothCallbackMatcher(
             address=self.address, service_uuid=SERVICE_UUID_FFE0
         )
@@ -82,18 +105,18 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
             BluetoothScanningMode.ACTIVE,
         )
 
-        # 初始刷新一次（主要用于 online 状态）
         self.async_set_updated_data(self._recalc_online(self.data))
 
     async def async_stop(self) -> None:
-        """Stop advertisement listener."""
+        """[已弃用] 停止广播监听器。"""
+        _LOGGER.warning("BleTagCoordinator.async_stop is deprecated")
         if self._unsub_adv is not None:
             self._unsub_adv()
             self._unsub_adv = None
 
     @callback
     def _adv_callback(self, service_info: BluetoothServiceInfoBleak, change) -> None:
-        """Update RSSI and last_seen from BLE advertisement callback."""
+        """更新 RSSI 和 last_seen。"""
         now = dt_util.utcnow()
         d = self.data
         d.rssi = service_info.rssi
@@ -101,7 +124,7 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
         self.async_set_updated_data(self._recalc_online(d))
 
     def _recalc_online(self, d: BleTagData) -> BleTagData:
-        """Recalculate online flag from last_seen and timeout."""
+        """重新计算在线状态。"""
         timeout = timedelta(seconds=DEFAULT_ONLINE_TIMEOUT_SECONDS)
         if d.last_seen:
             try:
@@ -118,7 +141,11 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
         return d
 
     async def async_refresh_battery(self, force: bool = False) -> None:
-        """Refresh battery via GATT, honoring cache unless forced."""
+        """[已弃用] 刷新电池电量。
+
+        请使用 AntiLossTagDevice.async_read_battery()
+        """
+        _LOGGER.warning("async_refresh_battery is deprecated. Use async_read_battery")
         now_ts = dt_util.utcnow().timestamp()
         d = self.data
 
@@ -133,15 +160,26 @@ class BleTagCoordinator(DataUpdateCoordinator[BleTagData]):
             self.async_set_updated_data(self._recalc_online(d))
 
     async def async_set_disconnect_alarm(self, enabled: bool) -> None:
-        """Write disconnect alarm policy to device and update state."""
+        """[已弃用] 设置断连报警。
+
+        请使用 AntiLossTagDevice.async_set_disconnect_alarm_policy()
+        """
+        _LOGGER.warning(
+            "async_set_disconnect_alarm is deprecated. Use async_set_disconnect_alarm_policy"
+        )
         await self.ble.write_disconnect_alarm(enabled)
         d = self.data
         d.disconnect_alarm = enabled
         self.async_set_updated_data(self._recalc_online(d))
 
     async def async_ring(self, seconds: int = 2) -> None:
-        """Ring device for the given duration in seconds."""
+        """[已弃用] 铃声报警。
+
+        请使用 AntiLossTagDevice.async_start_alarm() 和 async_stop_alarm()
+        """
+        _LOGGER.warning(
+            "async_ring is deprecated. Use async_start_alarm/async_stop_alarm"
+        )
         await self.ble.write_alert_level(True)
         await asyncio.sleep(max(1, int(seconds)))
-
         await self.ble.write_alert_level(False)

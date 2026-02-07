@@ -21,6 +21,8 @@ from .const import (
     DOMAIN,
 )
 
+from .utils.validation import is_valid_ble_address, is_valid_device_name
+
 
 class AntiLossTagConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for BLE Anti-Loss Tag."""
@@ -86,7 +88,34 @@ class AntiLossTagConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             address = user_input[CONF_ADDRESS].strip()
+
+            # 验证 BLE 地址格式
+            if not is_valid_ble_address(address):
+                errors[CONF_ADDRESS] = "invalid_ble_address"
+                schema = vol.Schema(
+                    {
+                        vol.Required(CONF_ADDRESS): str,
+                        vol.Optional(CONF_NAME): str,
+                    }
+                )
+                return self.async_show_form(
+                    step_id="user", data_schema=schema, errors=errors
+                )
+
             name = user_input.get(CONF_NAME, address).strip()
+
+            # 验证设备名称
+            if not is_valid_device_name(name):
+                errors[CONF_NAME] = "invalid_device_name"
+                schema = vol.Schema(
+                    {
+                        vol.Required(CONF_ADDRESS): str,
+                        vol.Optional(CONF_NAME): str,
+                    }
+                )
+                return self.async_show_form(
+                    step_id="user", data_schema=schema, errors=errors
+                )
 
             await self.async_set_unique_id(address)
             self._abort_if_unique_id_configured()
@@ -127,11 +156,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             {
                 vol.Required(
                     CONF_ALARM_ON_DISCONNECT,
-                    default=opts.get(CONF_ALARM_ON_DISCONNECT, DEFAULT_ALARM_ON_DISCONNECT),
+                    default=opts.get(
+                        CONF_ALARM_ON_DISCONNECT, DEFAULT_ALARM_ON_DISCONNECT
+                    ),
                 ): bool,
                 vol.Required(
                     CONF_MAINTAIN_CONNECTION,
-                    default=opts.get(CONF_MAINTAIN_CONNECTION, DEFAULT_MAINTAIN_CONNECTION),
+                    default=opts.get(
+                        CONF_MAINTAIN_CONNECTION, DEFAULT_MAINTAIN_CONNECTION
+                    ),
                 ): bool,
                 vol.Required(
                     CONF_AUTO_RECONNECT,

@@ -16,7 +16,9 @@
 		"error": {
 			"already_configured": "设备已添加",
 			"cannot_connect": "无法连接到设备",
-			"unknown": "未知错误"
+			"unknown": "未知错误",
+			"invalid_ble_address": "无效的 BLE 地址格式（应为 XX:XX:XX:XX:XX:XX）",
+			"invalid_device_name": "设备名称不能为空且长度不能超过 248 字符"
 		},
 		"abort": {
 			"already_in_progress": "配置流程已在进行中",
