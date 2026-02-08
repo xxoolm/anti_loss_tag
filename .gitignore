@@ -147,6 +147,31 @@ cython_debug/
 .DS_Store
 Thumbs.db
 
+# 密钥和证书文件
+*.key
+*.pem
+*.cert
+*.crt
+*.p12
+*.pfx
+*.secret
+*.id_rsa
+*.id_dsa
+*.jwt
+
+# 其他临时文件
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.patch
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
 # Project specific
 anti_loss_tag_v1/
 anti_loss_tag_v2/
@@ -156,3 +181,6 @@ anti_loss_tag_v2/
 *.pdf
 *.java
 archive/PROJECT_REFACTORING_SUMMARY.md
+
+# archive目录已移到archive-reference分支
+archive/
