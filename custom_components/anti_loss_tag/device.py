@@ -538,7 +538,8 @@ class AntiLossTagDevice:
                 return
 
             try:
-                await client.get_services()
+                # 访问 services 属性触发服务发现（bleak 的 services 是 property）
+                _ = client.services
             except BleakError as err:
                 await self._release_connection_slot()
                 backoff = self._apply_connect_backoff(
@@ -802,10 +803,10 @@ class AntiLossTagDevice:
             if isinstance(
                 char_specifier, str
             ) and "Multiple Characteristics with this UUID" in str(err):
-                try:
-                    await client.get_services()
-                except BleakError:
-                    pass
+                # 访问 services 属性确保服务发现完成（bleak 的 services 是 property）
+                _ = client.services
+                # 刷新 handle 缓存
+                self._cached_chars.clear()
 
                 handle = _resolve_handle_for_uuid(char_specifier)
                 if handle is not None:
