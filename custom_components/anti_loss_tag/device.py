@@ -426,7 +426,7 @@ class AntiLossTagDevice:
             self._ensure_connect_task()
 
     async def async_ensure_connected(self) -> None:
-        """没有可连接的 BLEDevice（可能超出范围或没有可连接的扫描器）。"""
+        """Ensure BLE connection is established and ready for GATT operations."""
         async with self._connect_lock:
             # ====== 连接退避：避免多设备同时冲连接 ======
             now_ts = time.time()
@@ -487,15 +487,37 @@ class AntiLossTagDevice:
                 backoff = self._apply_connect_backoff(
                     max_backoff=MAX_CONNECT_BACKOFF_SECONDS
                 )
-            if self._conn_mgr is not None:
-                await self._conn_mgr.release()
-                self._conn_slot_acquired = False
-            raise
+                self._last_error = f"连接失败: {err}; {backoff}s 后重试"
+                self._connected = False
+                self._client = None
+                self._async_dispatch_update()
+                return
 
-        backoff = self._apply_connect_backoff(max_backoff=MAX_CONNECT_BACKOFF_SECONDS)
-        self._last_error = f"服务发现失败: {err}"
-        self._async_dispatch_update()
-        raise
+            try:
+                await client.get_services()
+            except BleakError as err:
+                await self._release_connection_slot()
+                backoff = self._apply_connect_backoff(
+                    max_backoff=MAX_CONNECT_BACKOFF_SECONDS
+                )
+                self._last_error = f"服务发现失败: {err}; {backoff}s 后重试"
+                self._connected = False
+                self._client = None
+                self._async_dispatch_update()
+                try:
+                    await client.disconnect()
+                except BleakError:
+                    pass
+                return
+
+            self._client = client
+            self._connected = True
+            self._last_error = None
+            self._connect_fail_count = 0
+            self._cooldown_until_ts = 0.0
+            self._resolve_gatt_handles()
+            await self._async_enable_notifications()
+            self._async_dispatch_update()
 
     async def async_disconnect(self) -> None:
         async with self._connect_lock:
@@ -748,7 +770,7 @@ class AntiLossTagDevice:
                 raise BleakError("没有可用的 BLE 客户端用于写入")
 
             # ====== 多特征同 UUID：按 handle 重试（兼容 bleak 报错） ======
-            async def _resolve_handle_for_uuid(u: str) -> int | None:
+            def _resolve_handle_for_uuid(u: str) -> int | None:
                 # 2A06（报警）通常在 1802 Immediate Alert 服务下；其余默认不限定服务
                 preferred = (
                     _UUID_SERVICE_IMMEDIATE_ALERT_1802
