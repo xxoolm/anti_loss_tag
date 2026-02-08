@@ -31,9 +31,34 @@
 
 本集成是针对KT6368A芯片（双模蓝牙5.1 SoC）及其定制防丢固件的专门适配器，充分利用该芯片的FFE0/FFE1/FFE2自定义协议特性，实现完整的防丢标签功能。
 
+###  **版本号同步要求**
+
+**开发者注意事项**：每次代码更新或发布新版本时，必须同步更新以下文件的版本号：
+
+1. **`custom_components/anti_loss_tag/manifest.json`** 中的 `version` 字段
+2. **`pyproject.toml`** 中的 `version` 字段
+3. **Git tag**：创建对应的版本标签（如 v1.6.8）
+
+**为什么需要同步**：
+- Home Assistant 读取 `manifest.json` 中的版本号用于显示
+- HACS 使用 Git tag 来管理版本更新
+- 版本不一致会导致用户界面显示错误的版本号
+
+**检查清单**（每次提交前）：
+```bash
+# 确认 manifest.json 版本号
+cat custom_components/anti_loss_tag/manifest.json | grep version
+
+# 确认 pyproject.toml 版本号
+cat pyproject.toml | grep version
+
+# 确认最新 tag
+git tag --list "v*" | sort -V | tail -1
+```
+
 ##  项目状态
 
-**当前版本**: v1.4.0 (2025-02-08)
+**当前版本**: v1.6.7 (2026-02-08)
 
 **开发状态**: 稳定版，可用于生产环境
 

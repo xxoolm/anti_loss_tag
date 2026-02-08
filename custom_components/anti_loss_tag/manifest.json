@@ -1,7 +1,7 @@
 {
 	"domain": "anti_loss_tag",
 	"name": "KT6368A BLE 防丢标签",
-	"version": "1.4.0",
+	"version": "1.6.7",
 	"config_flow": true,
 	"documentation": "https://github.com/xxoolm/anti_loss_tag",
 	"issue_tracker": "https://github.com/xxoolm/anti_loss_tag/issues",
