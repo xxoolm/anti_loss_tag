@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """弃用的 BLE 操作封装模块。
 
 此模块已被 device.py.AntiLossTagDevice 完全替代。

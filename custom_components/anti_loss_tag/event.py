@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 from homeassistant.components.event import EventDeviceClass, EventEntity

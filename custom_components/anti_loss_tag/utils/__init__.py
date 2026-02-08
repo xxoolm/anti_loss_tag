@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """工具函数模块。"""
 
 from __future__ import annotations

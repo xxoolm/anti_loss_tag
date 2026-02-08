@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """输入验证工具模块。"""
 
 from __future__ import annotations
