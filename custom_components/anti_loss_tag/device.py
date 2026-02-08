@@ -66,7 +66,25 @@ class ButtonEvent:
 
 
 class AntiLossTagDevice:
-    """Device/session manager for a single BLE anti-loss tag."""
+    """KT6368A芯片专用设备管理器（基于官方Android应用验证）。
+
+    本类专门管理基于KT6368A双模蓝牙5.1 SoC的防丢标签设备，
+    实现参考LenzeTech官方Android应用的BLE协议操作。
+
+    官方参考：
+    - Java源码：archive/temp_files/MyApplication.java (526行)
+    - 架构分析：docs/Java参考/Java代码审核.md
+    - 移植指南：docs/Java参考/Java到Python移植指南.md
+
+    协议特性（FFE0服务 - 官方实现）：
+    - FFE0: 服务UUID（设备扫描和识别）
+    - FFE1: 通知特征（按键事件实时上报，字节流格式）
+      参考代码：MyApplication$3.java 第115行
+    - FFE2: 写入特征（断开报警策略同步）
+      参考代码：MyApplication$3.java 第120-128行
+    - 2A06: Alert Level特征（即时报警：0x01=响铃，0x00=停止）
+    - 2A19: Battery Level特征（电量读取：0-100%）
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass

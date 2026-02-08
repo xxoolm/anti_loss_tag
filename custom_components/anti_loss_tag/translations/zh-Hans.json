@@ -2,21 +2,21 @@
 	"config": {
 		"step": {
 			"user": {
-				"title": "扫描 BLE 设备",
-				"description": "选择要添加的 BLE 防丢标签设备",
+				"title": "扫描 KT6368A 设备",
+				"description": "选择要添加的 KT6368A 防丢标签设备（服务UUID FFE0）",
 				"data": {
-					"address": "设备地址",
-					"name": "设备名称"
+					"address": "设备MAC地址",
+					"name": "设备名称（如KT6368A-BLE）"
 				}
 			},
 			"confirm": {
-				"title": "确认添加设备",
-				"description": "是否要添加此设备？"
+				"title": "确认添加 KT6368A 设备",
+				"description": "是否要添加此KT6368A防丢标签？"
 			}
 		},
 		"error": {
 			"already_configured": "设备已添加",
-			"cannot_connect": "无法连接到设备",
+			"cannot_connect": "无法连接到KT6368A设备",
 			"unknown": "未知错误",
 			"invalid_ble_address": "无效的 BLE 地址格式（应为 XX:XX:XX:XX:XX:XX）",
 			"invalid_device_name": "设备名称不能为空且长度不能超过 248 字符"
@@ -24,8 +24,8 @@
 		"abort": {
 			"already_in_progress": "配置流程已在进行中",
 			"already_configured": "设备已配置",
-			"no_devices_found": "未找到设备",
-			"not_supported": "设备不支持"
+			"no_devices_found": "未找到KT6368A设备（请确保设备广播FFE0服务）",
+			"not_supported": "设备不支持（仅支持基于KT6368A芯片的设备）"
 		}
 	},
 	"options": {
