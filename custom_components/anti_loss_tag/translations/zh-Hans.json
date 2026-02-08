@@ -1,0 +1,44 @@
+{
+	"config": {
+		"step": {
+			"confirm": {
+				"title": "添加 KT6368A 防丢标签",
+				"description": "是否要添加此 KT6368A 防丢标签？\n\n设备名称：{name}\nMAC 地址：{address}"
+			},
+			"user": {
+				"title": "手动添加 KT6368A 设备",
+				"description": "请输入 KT6368A 防丢标签的信息",
+				"data": {
+					"address": "MAC 地址",
+					"name": "设备名称（可选）"
+				}
+			}
+		},
+		"error": {
+			"invalid_ble_address": "无效的 BLE MAC 地址格式",
+			"invalid_device_name": "设备名称不能为空或仅包含空格",
+			"no_discovery_info": "无设备发现信息",
+			"not_connectable": "设备不可连接（可能超出范围）"
+		},
+		"abort": {
+			"already_configured": "此设备已配置",
+			"no_discovery_info": "无设备发现信息",
+			"not_connectable": "设备不可连接"
+		}
+	},
+	"options": {
+		"step": {
+			"init": {
+				"title": "配置选项",
+				"description": "调整 KT6368A 防丢标签的设置",
+				"data": {
+					"alarm_on_disconnect": "断开连接时报警",
+					"maintain_connection": "保持连接",
+					"auto_reconnect": "自动重连",
+					"battery_poll_interval_min": "电量轮询间隔（分钟）"
+				}
+			}
+		}
+	},
+	"title": "KT6368A 防丢标签"
+}

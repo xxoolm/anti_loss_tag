@@ -50,7 +50,11 @@ class AntiLossTagConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not discovery_info.connectable:
             return self.async_abort(reason="not_connectable")
 
-        name = discovery_info.name or discovery_info.device.name or address
+        if discovery_info.name or discovery_info.device.name:
+            name = discovery_info.name or discovery_info.device.name
+        else:
+            short_address = address[-5:]
+            name = f"KT6368A 防丢标签 ({short_address})"
         self._address = address
         self._name = name
 
