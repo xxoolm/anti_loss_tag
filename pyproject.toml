@@ -1,6 +1,6 @@
 [project]
 name = "anti_loss_tag"
-version = "1.8.0"
+version = "2.0.3"
 description = "KT6368A BLE 防丢标签 Home Assistant 集成"
 readme = "README.md"
 requires-python = ">=3.11"

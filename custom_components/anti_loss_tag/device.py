@@ -7,7 +7,7 @@ import asyncio
 import logging
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -67,6 +67,17 @@ class ButtonEvent:
     raw: bytes
 
 
+@dataclass
+class DeviceOperation:
+    """串行化设备操作任务。"""
+
+    name: str
+    action: Callable[[], Awaitable[Any]]
+    retries: int
+    retry_delay: float
+    future: asyncio.Future[Any]
+
+
 class AntiLossTagDevice:
     """KT6368A芯片专用设备管理器。
 
@@ -120,6 +131,12 @@ class AntiLossTagDevice:
 
         self._connect_task: asyncio.Task | None = None
         self._battery_task: asyncio.Task | None = None
+        self._op_worker_task: asyncio.Task | None = None
+        self._op_queue: asyncio.PriorityQueue[tuple[int, int, DeviceOperation]] = (
+            asyncio.PriorityQueue()
+        )
+        self._op_seq: int = 0
+        self._battery_read_lock = asyncio.Lock()
 
         self._last_error: str | None = None
 
@@ -151,6 +168,19 @@ class AntiLossTagDevice:
         self._connection_error_classification: str | None = None
         self._connection_error_type: str | None = None
         self._last_connect_attempt: datetime | None = None
+        self._connection_state: str = "idle"
+
+        self._last_operation_error: str | None = None
+
+        self._op_priority_alarm = 10
+        self._op_priority_policy = 20
+        self._op_priority_battery = 50
+        self._last_alarm_operation_ts: float = 0.0
+        self._battery_defer_count: int = 0
+        self._last_battery_sleep_seconds: float = 0.0
+        self._last_battery_sleep_reason: str = "init"
+        self._adaptive_mode: str = "normal"
+        self._adaptive_timeout_ratio: float = 0.0
 
     # -------------------------
     # Public read-only state
@@ -186,6 +216,54 @@ class AntiLossTagDevice:
     @property
     def last_error(self) -> str | None:
         return self._last_error
+
+    @property
+    def connection_state(self) -> str:
+        return self._connection_state
+
+    @property
+    def connection_error_classification(self) -> str | None:
+        return self._connection_error_classification
+
+    @property
+    def connection_error_type(self) -> str | None:
+        return self._connection_error_type
+
+    @property
+    def operation_queue_size(self) -> int:
+        return self._op_queue.qsize()
+
+    @property
+    def operation_worker_running(self) -> bool:
+        return self._op_worker_task is not None and not self._op_worker_task.done()
+
+    @property
+    def last_operation_error(self) -> str | None:
+        return self._last_operation_error
+
+    @property
+    def battery_defer_count(self) -> int:
+        return self._battery_defer_count
+
+    @property
+    def last_battery_sleep_seconds(self) -> float:
+        return self._last_battery_sleep_seconds
+
+    @property
+    def last_battery_sleep_reason(self) -> str:
+        return self._last_battery_sleep_reason
+
+    @property
+    def battery_read_busy(self) -> bool:
+        return self._battery_read_lock.locked()
+
+    @property
+    def adaptive_mode(self) -> str:
+        return self._adaptive_mode
+
+    @property
+    def adaptive_timeout_ratio(self) -> float:
+        return self._adaptive_timeout_ratio
 
     # -------------------------
     # Options
@@ -239,6 +317,7 @@ class AntiLossTagDevice:
             )
 
         self._ensure_battery_task()
+        self._ensure_operation_worker()
 
     def async_stop(self) -> None:
         """Stop tasks, callbacks and disconnect."""
@@ -257,6 +336,12 @@ class AntiLossTagDevice:
         if self._connect_task is not None:
             self._connect_task.cancel()
             self._connect_task = None
+
+        if self._op_worker_task is not None:
+            self._op_worker_task.cancel()
+            self._op_worker_task = None
+
+        self._clear_operation_queue()
 
         self.hass.async_create_task(self.async_disconnect())
 
@@ -396,6 +481,184 @@ class AntiLossTagDevice:
         if self._battery_task is None or self._battery_task.done():
             self._battery_task = self.hass.async_create_task(self._async_battery_loop())
 
+    def _ensure_operation_worker(self) -> None:
+        if self._op_worker_task is not None and not self._op_worker_task.done():
+            return
+        self._op_worker_task = self.hass.async_create_task(
+            self._async_operation_worker()
+        )
+
+    def _clear_operation_queue(self) -> None:
+        while True:
+            try:
+                _, _, op = self._op_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if not op.future.done():
+                op.future.cancel()
+            self._op_queue.task_done()
+
+    async def _async_enqueue_operation(
+        self,
+        *,
+        name: str,
+        action: Callable[[], Awaitable[Any]],
+        priority: int,
+        retries: int = 0,
+        retry_delay: float = 0.8,
+    ) -> Any:
+        self._ensure_operation_worker()
+        self._op_seq += 1
+        future: asyncio.Future[Any] = self.hass.loop.create_future()
+        op = DeviceOperation(
+            name=name,
+            action=action,
+            retries=max(0, retries),
+            retry_delay=max(0.0, retry_delay),
+            future=future,
+        )
+        await self._op_queue.put((priority, self._op_seq, op))
+        return await future
+
+    def _is_retryable_operation_error(self, err: Exception) -> bool:
+        classification = self._connection_error_classification
+        if classification in {"slot_timeout", "connect_error", "scanner_unavailable"}:
+            return True
+        return isinstance(err, (TimeoutError, OSError))
+
+    def _compute_slot_acquire_timeout(self, *, connect_purpose: str) -> float:
+        timeout = float(CONNECTION_SLOT_ACQUIRE_TIMEOUT)
+        if connect_purpose == "background_battery":
+            timeout = min(timeout, 6.0)
+        elif connect_purpose in {"interactive_alarm", "policy_sync"}:
+            timeout = max(timeout, 25.0)
+
+        conn_mgr = self._conn_mgr
+        if conn_mgr is not None:
+            try:
+                if conn_mgr.in_use >= conn_mgr.max_connections:
+                    if connect_purpose == "background_battery":
+                        timeout = min(timeout, 4.0)
+                    else:
+                        timeout = min(30.0, timeout + 5.0)
+
+                # 若近期超时率高，后台任务更快放弃，前台任务适当增加等待
+                if conn_mgr.acquire_total >= 10:
+                    timeout_ratio = conn_mgr.acquire_timeout / conn_mgr.acquire_total
+                    self._adaptive_timeout_ratio = timeout_ratio
+                    if timeout_ratio >= 0.4:
+                        self._adaptive_mode = "timeout_high"
+                        if connect_purpose == "background_battery":
+                            timeout = min(timeout, 3.0)
+                        else:
+                            timeout = min(30.0, timeout + 4.0)
+                    else:
+                        self._adaptive_mode = "normal"
+            except (AttributeError, TypeError):
+                pass
+
+        return timeout
+
+    def _should_defer_battery_poll(self) -> bool:
+        # 已连接时读取电量不需要再争抢连接槽位，不应被延后
+        if self._connected and self._client is not None:
+            return False
+
+        # 优先保障用户触发的报警操作
+        if self._op_queue.qsize() > 0:
+            return True
+
+        # 报警操作后的短窗口内，暂缓后台轮询
+        now_ts = time.monotonic()
+        if (now_ts - self._last_alarm_operation_ts) < 8.0:
+            return True
+
+        # 全局连接槽位接近占满时，暂缓低优先级电量轮询
+        if self._conn_mgr is not None:
+            try:
+                if self._conn_mgr.in_use >= self._conn_mgr.max_connections:
+                    return True
+            except (AttributeError, TypeError):
+                return False
+
+        return False
+
+    def _compute_next_battery_sleep_seconds(
+        self, *, force_connect: bool
+    ) -> tuple[float, str]:
+        if self._op_queue.qsize() >= 3:
+            self._adaptive_mode = "queue_busy"
+            return (120.0, "queue_busy")
+
+        conn_mgr = self._conn_mgr
+        if conn_mgr is not None:
+            try:
+                if conn_mgr.average_wait_ms >= 1500.0:
+                    self._adaptive_mode = "conn_mgr_congested"
+                    return (240.0, "conn_mgr_congested")
+            except (AttributeError, TypeError):
+                pass
+
+        if self._battery is None:
+            return (90.0, "bootstrap_battery")
+
+        if force_connect and self._connection_error_classification in {
+            "scanner_unavailable",
+            "slot_timeout",
+            "connect_error",
+        }:
+            return (180.0, "recovery_after_connect_failure")
+
+        base = float(self.battery_poll_interval_min * 60)
+        jitter = float(random.randint(0, BATTERY_POLL_JITTER_SECONDS))
+        return (base + jitter, "normal_poll")
+
+    async def _async_operation_worker(self) -> None:
+        while True:
+            _, _, op = await self._op_queue.get()
+            try:
+                attempt = 0
+                while True:
+                    try:
+                        if op.name in {"start_alarm", "stop_alarm"}:
+                            self._last_alarm_operation_ts = time.monotonic()
+                        result = await op.action()
+                        if not op.future.done():
+                            op.future.set_result(result)
+                        break
+                    except asyncio.CancelledError:
+                        if not op.future.done():
+                            op.future.cancel()
+                        raise
+                    except (BleakError, TimeoutError, OSError) as err:
+                        attempt += 1
+                        self._last_operation_error = f"{op.name}: {err}"
+                        should_retry = (
+                            attempt <= op.retries
+                            and self._is_retryable_operation_error(err)
+                        )
+                        if should_retry:
+                            _LOGGER.debug(
+                                "设备 %s 操作 %s 失败，重试 %d/%d: %s",
+                                self.address,
+                                op.name,
+                                attempt,
+                                op.retries,
+                                err,
+                            )
+                            await asyncio.sleep(op.retry_delay * (2 ** (attempt - 1)))
+                            continue
+                        if not op.future.done():
+                            op.future.set_exception(err)
+                        break
+                    except Exception as err:  # noqa: BLE001
+                        self._last_operation_error = f"{op.name}: {err}"
+                        if not op.future.done():
+                            op.future.set_exception(err)
+                        break
+            finally:
+                self._op_queue.task_done()
+
     def _ble_device_callback(self) -> BLEDevice | None:
         return bluetooth.async_ble_device_from_address(
             self.hass, self.address, connectable=True
@@ -439,6 +702,10 @@ class AntiLossTagDevice:
         self._cooldown_until_ts = time.time() + backoff
         return backoff
 
+    def _set_connection_state(self, state: str) -> None:
+        if self._connection_state != state:
+            self._connection_state = state
+
     def _on_disconnect(self, _client) -> None:
         """Handle disconnect callback from bleak.
 
@@ -447,6 +714,7 @@ class AntiLossTagDevice:
         """
         try:
             self._connected = False
+            self._set_connection_state("degraded")
 
             # ====== 对齐 HA IQS log-when-unavailable：记录不可用日志（仅一次） ======
             if not self._unavailability_logged:
@@ -474,7 +742,7 @@ class AntiLossTagDevice:
         if self.auto_reconnect and self.maintain_connection:
             self._ensure_connect_task()
 
-    async def async_ensure_connected(self) -> bool:
+    async def async_ensure_connected(self, *, connect_purpose: str = "general") -> bool:
         """Ensure BLE connection is established and ready for GATT operations.
 
         Returns:
@@ -484,9 +752,13 @@ class AntiLossTagDevice:
             # ====== 连接退避：避免多设备同时冲连接 ======
             now_ts = time.time()
             if now_ts < self._cooldown_until_ts:
+                self._set_connection_state("backoff")
                 return False
             if self._connected and self._client is not None:
+                self._set_connection_state("ready")
                 return True
+
+            self._set_connection_state("connecting")
 
             ble_device = bluetooth.async_ble_device_from_address(
                 self.hass, self.address, connectable=True
@@ -497,6 +769,7 @@ class AntiLossTagDevice:
                 self._connection_error_type = "device_not_connectable"
                 self._connected = False
                 self._client = None
+                self._set_connection_state("scanning")
 
                 # ====== 主动断开：归还全局连接槽位 ======
                 await self._release_connection_slot()
@@ -506,20 +779,20 @@ class AntiLossTagDevice:
 
             # ====== 获取全局连接槽位（跨设备并发控制） ======
             if self._conn_mgr is not None and not self._conn_slot_acquired:
-                acq = await self._conn_mgr.acquire(
-                    timeout=CONNECTION_SLOT_ACQUIRE_TIMEOUT
+                slot_timeout = self._compute_slot_acquire_timeout(
+                    connect_purpose=connect_purpose
                 )
+                acq = await self._conn_mgr.acquire(timeout=slot_timeout)
                 if not acq.acquired:
                     backoff = self._apply_connect_backoff(
                         max_backoff=MAX_CONNECT_BACKOFF_SECONDS // 2
                     )
-                    self._last_error = (
-                        f"等待连接槽位中({acq.reason}); {backoff}s 后重试"
-                    )
+                    self._last_error = f"等待连接槽位中({acq.reason}, timeout={slot_timeout:.1f}s); {backoff}s 后重试"
                     self._connection_error_classification = "slot_timeout"
                     self._connection_error_type = f"acquire_failed:{acq.reason}"
                     self._connected = False
                     self._client = None
+                    self._set_connection_state("backoff")
                     self._async_dispatch_update()
                     return False
                 self._conn_slot_acquired = True
@@ -549,9 +822,11 @@ class AntiLossTagDevice:
                 self._connection_error_type = type(err).__name__
                 self._connected = False
                 self._client = None
+                self._set_connection_state("backoff")
                 self._async_dispatch_update()
                 return False
 
+            self._set_connection_state("discovering")
             try:
                 # 访问 services 属性触发服务发现（bleak 的 services 是 property）
                 _ = client.services
@@ -565,6 +840,7 @@ class AntiLossTagDevice:
                 self._connection_error_type = "BleakError"
                 self._connected = False
                 self._client = None
+                self._set_connection_state("degraded")
                 self._async_dispatch_update()
                 try:
                     await client.disconnect()
@@ -585,10 +861,10 @@ class AntiLossTagDevice:
                 _LOGGER.info("Device %s recovered", self.name)
                 self._unavailability_logged = False
 
-            self._resolve_gatt_handles()
-            await self._async_enable_notifications()
-            return True
+            init_ok = await self._async_post_connect_setup()
+            self._set_connection_state("ready" if init_ok else "degraded")
             self._async_dispatch_update()
+            return True
 
     async def async_disconnect(self) -> None:
         async with self._connect_lock:
@@ -608,12 +884,39 @@ class AntiLossTagDevice:
                 self._connected = False
                 self._alert_level_handle = None
                 self._battery_level_handle = None
+                self._set_connection_state("idle")
                 self._async_dispatch_update()
 
-    async def _async_enable_notifications(self) -> None:
+    async def _async_post_connect_setup(self) -> bool:
+        """Run post-connection initialization pipeline."""
+        self._resolve_gatt_handles()
+
+        notifications_ok = await self._async_enable_notifications()
+        if not notifications_ok:
+            self._connection_error_classification = "notify_error"
+            self._connection_error_type = "start_notify_failed"
+
+        # 对齐 Android 流程：连接稳定后立即读取一次电量
+        await self._async_read_battery_impl(force_connect=False)
+
+        # 最佳努力同步断开报警策略，失败不影响连接可用性
+        try:
+            await self._async_write_bytes(
+                UUID_WRITE_FFE2,
+                bytes([0x01 if self.alarm_on_disconnect else 0x00]),
+                prefer_response=True,
+                connect_purpose="policy_sync",
+            )
+        except (BleakError, TimeoutError, OSError) as err:
+            self._last_error = f"同步断开报警策略失败: {err}"
+            _LOGGER.debug("设备 %s 策略同步失败: %s", self.address, err)
+
+        return notifications_ok
+
+    async def _async_enable_notifications(self) -> bool:
         client = self._client
         if client is None:
-            return
+            return False
 
         async def _handler(_sender: int, data: bytearray) -> None:
             raw = bytes(data)
@@ -628,9 +931,11 @@ class AntiLossTagDevice:
 
         try:
             await client.start_notify(UUID_NOTIFY_FFE1, _handler)
+            return True
         except BleakError as err:
             self._last_error = f"开启通知(FFE1)失败: {err}"
             self._async_dispatch_update()
+            return False
 
     # -------------------------
     # Characteristic handle resolution
@@ -736,37 +1041,82 @@ class AntiLossTagDevice:
     # GATT operations
     # -------------------------
     async def async_start_alarm(self) -> None:
-        char = (
-            self._alert_level_handle
-            if self._alert_level_handle is not None
-            else UUID_ALERT_LEVEL_2A06
+        async def _action() -> None:
+            char = (
+                self._alert_level_handle
+                if self._alert_level_handle is not None
+                else UUID_ALERT_LEVEL_2A06
+            )
+            await self._async_write_bytes(
+                char,
+                bytes([0x01]),
+                prefer_response=False,
+                connect_purpose="interactive_alarm",
+            )
+
+        await self._async_enqueue_operation(
+            name="start_alarm",
+            action=_action,
+            priority=self._op_priority_alarm,
+            retries=1,
+            retry_delay=0.6,
         )
-        await self._async_write_bytes(char, bytes([0x01]), prefer_response=False)
 
     async def async_stop_alarm(self) -> None:
-        char = (
-            self._alert_level_handle
-            if self._alert_level_handle is not None
-            else UUID_ALERT_LEVEL_2A06
+        async def _action() -> None:
+            char = (
+                self._alert_level_handle
+                if self._alert_level_handle is not None
+                else UUID_ALERT_LEVEL_2A06
+            )
+            await self._async_write_bytes(
+                char,
+                bytes([0x00]),
+                prefer_response=False,
+                connect_purpose="interactive_alarm",
+            )
+
+        await self._async_enqueue_operation(
+            name="stop_alarm",
+            action=_action,
+            priority=self._op_priority_alarm,
+            retries=1,
+            retry_delay=0.6,
         )
-        await self._async_write_bytes(char, bytes([0x00]), prefer_response=False)
 
     async def async_set_disconnect_alarm_policy(
         self, enabled: bool, force_connect: bool
     ) -> None:
-        value = bytes([0x01 if enabled else 0x00])
-        if self._client is None and force_connect:
-            await self.async_ensure_connected()
-            # If user does not want to maintain connection, disconnect afterwards
-            if not self.maintain_connection:
-                try:
-                    await self._async_write_bytes(
-                        UUID_WRITE_FFE2, value, prefer_response=True
-                    )
-                finally:
-                    await self.async_disconnect()
-                return
-        await self._async_write_bytes(UUID_WRITE_FFE2, value, prefer_response=True)
+        async def _action() -> None:
+            value = bytes([0x01 if enabled else 0x00])
+            if self._client is None and force_connect:
+                await self.async_ensure_connected(connect_purpose="policy_sync")
+                # If user does not want to maintain connection, disconnect afterwards
+                if not self.maintain_connection:
+                    try:
+                        await self._async_write_bytes(
+                            UUID_WRITE_FFE2,
+                            value,
+                            prefer_response=True,
+                            connect_purpose="policy_sync",
+                        )
+                    finally:
+                        await self.async_disconnect()
+                    return
+            await self._async_write_bytes(
+                UUID_WRITE_FFE2,
+                value,
+                prefer_response=True,
+                connect_purpose="policy_sync",
+            )
+
+        await self._async_enqueue_operation(
+            name="sync_disconnect_policy",
+            action=_action,
+            priority=self._op_priority_policy,
+            retries=1,
+            retry_delay=0.8,
+        )
 
     async def _async_gatt_operation_with_uuid_fallback(
         self,
@@ -839,6 +1189,22 @@ class AntiLossTagDevice:
             raise
 
     async def async_read_battery(self, force_connect: bool) -> None:
+        # 避免后台轮询重复堆积读电量任务
+        if self._battery_read_lock.locked() and not force_connect:
+            return
+
+        async with self._battery_read_lock:
+            await self._async_enqueue_operation(
+                name="read_battery",
+                action=lambda: self._async_read_battery_impl(
+                    force_connect=force_connect
+                ),
+                priority=self._op_priority_battery,
+                retries=1,
+                retry_delay=1.2,
+            )
+
+    async def _async_read_battery_impl(self, force_connect: bool) -> None:
         if self._client is None:
             if not force_connect:
                 # 节流日志：只在首次或长时间未读取时记录
@@ -848,7 +1214,9 @@ class AntiLossTagDevice:
                         self.address,
                     )
                 return
-            connected = await self.async_ensure_connected()
+            connected = await self.async_ensure_connected(
+                connect_purpose="background_battery"
+            )
             if not connected or self._client is None:
                 _LOGGER.warning(
                     "设备 %s 无法建立连接以读取电量: %s",
@@ -889,10 +1257,16 @@ class AntiLossTagDevice:
                 self._async_dispatch_update()
 
     async def _async_write_bytes(
-        self, uuid: str | int, data: bytes, prefer_response: bool
+        self,
+        uuid: str | int,
+        data: bytes,
+        prefer_response: bool,
+        connect_purpose: str = "general",
     ) -> None:
         if self._client is None:
-            connected = await self.async_ensure_connected()
+            connected = await self.async_ensure_connected(
+                connect_purpose=connect_purpose
+            )
             if not connected or self._client is None:
                 error_detail = self._last_error or "未知错误"
                 raise BleakError(
@@ -938,17 +1312,28 @@ class AntiLossTagDevice:
                     raise
 
     async def _async_battery_loop(self) -> None:
+        # 启动后立即尝试一次读取，避免首次电量长时间 unknown
+        await asyncio.sleep(random.uniform(0.5, 3.0))
         while True:
             try:
-                # ====== 抖动（避免多设备同时轮询） ======
-                base = self.battery_poll_interval_min * 60
-                jitter = random.randint(0, BATTERY_POLL_JITTER_SECONDS)
-                await asyncio.sleep(base + jitter)
-                # ====== 结束 ======
-
                 # 首次读取或电量为 None 时，强制建立连接
                 force = (self._battery is None) or (not self.maintain_connection)
+
+                if self._should_defer_battery_poll():
+                    self._battery_defer_count += 1
+                    self._last_battery_sleep_seconds = 15.0
+                    self._last_battery_sleep_reason = "defer_for_foreground"
+                    await asyncio.sleep(15.0)
+                    continue
+
                 await self.async_read_battery(force_connect=force)
+                next_sleep, reason = self._compute_next_battery_sleep_seconds(
+                    force_connect=force
+                )
+                self._last_battery_sleep_seconds = next_sleep
+                self._last_battery_sleep_reason = reason
+                await asyncio.sleep(next_sleep)
+                # ====== 结束 ======
             except asyncio.CancelledError:
                 # 任务被取消，清理资源后重新抛出
                 _LOGGER.debug("Battery loop cancelled for %s", self.address)

@@ -9,17 +9,17 @@ from homeassistant.helpers import device_registry as dr
 
 from . import BleConnectionManager
 from .const import (
-    ADDRESS,
+    CONF_ADDRESS,
     CONF_ALARM_ON_DISCONNECT,
     CONF_AUTO_RECONNECT,
     CONF_BATTERY_POLL_INTERVAL_MIN,
     CONF_MAINTAIN_CONNECTION,
+    CONF_NAME,
     DEFAULT_ALARM_ON_DISCONNECT,
     DEFAULT_AUTO_RECONNECT,
     DEFAULT_BATTERY_POLL_INTERVAL_MIN,
     DEFAULT_MAINTAIN_CONNECTION,
     DOMAIN,
-    NAME,
 )
 
 
@@ -70,11 +70,16 @@ async def async_get_config_entry_diagnostics(
     if DOMAIN in hass.data and "_conn_mgr" in hass.data[DOMAIN]:
         conn_mgr: BleConnectionManager | None = hass.data[DOMAIN].get("_conn_mgr")
         if conn_mgr:
-            max_conn = getattr(conn_mgr, "_max_connections", "unknown")
+            max_conn = conn_mgr.max_connections
             sem = getattr(conn_mgr, "_sem", None)
             conn_mgr_info = {
                 "max_connections": max_conn,
                 "connection_slots_available": sem._value if sem else "unknown",
+                "in_use": conn_mgr.in_use,
+                "acquire_total": conn_mgr.acquire_total,
+                "acquire_timeout": conn_mgr.acquire_timeout,
+                "acquire_error": conn_mgr.acquire_error,
+                "average_wait_ms": round(conn_mgr.average_wait_ms, 2),
             }
 
     # Redact sensitive address (show only first 6 chars)
@@ -82,8 +87,8 @@ async def async_get_config_entry_diagnostics(
 
     return {
         "entry_data": {
-            NAME: entry.data.get(NAME),
-            ADDRESS: address_redacted,
+            CONF_NAME: entry.data.get(CONF_NAME),
+            CONF_ADDRESS: address_redacted,
         },
         "options": {
             CONF_MAINTAIN_CONNECTION: entry.options.get(
@@ -101,7 +106,7 @@ async def async_get_config_entry_diagnostics(
         },
         "device_state": {
             "available": device.available,
-            "connected": device._connected,
+            "connected": device.connected,
             "rssi": device.rssi,
             "battery": device.battery,
             "last_seen": device.last_seen.isoformat() if device.last_seen else None,
@@ -111,11 +116,22 @@ async def async_get_config_entry_diagnostics(
                 else None
             ),
             "last_error": device.last_error,
-            "connection_error_type": device._connection_error_type,
+            "last_operation_error": device.last_operation_error,
+            "connection_state": device.connection_state,
+            "connection_error_classification": device.connection_error_classification,
+            "connection_error_type": device.connection_error_type,
             "maintain_connection": device.maintain_connection,
             "auto_reconnect": device.auto_reconnect,
             "alarm_on_disconnect": device.alarm_on_disconnect,
-            "battery_poll_interval": device.battery_poll_interval,
+            "battery_poll_interval_min": device.battery_poll_interval_min,
+            "operation_queue_size": device.operation_queue_size,
+            "operation_worker_running": device.operation_worker_running,
+            "battery_read_busy": device.battery_read_busy,
+            "battery_defer_count": device.battery_defer_count,
+            "last_battery_sleep_seconds": round(device.last_battery_sleep_seconds, 2),
+            "last_battery_sleep_reason": device.last_battery_sleep_reason,
+            "adaptive_mode": device.adaptive_mode,
+            "adaptive_timeout_ratio": round(device.adaptive_timeout_ratio, 4),
         },
         "connection_state": {
             "client_exists": device._client is not None,
