@@ -1,10 +1,11 @@
-# AGENTS.md - Home Assistant 防丢标签集成开发指南
+# AGENTS.md - Home Assistant KT6368A 防丢标签集成开发指南
 
 本文档为 AI 编码助手（agentic coding agents）提供项目规范和最佳实践。
 
 ## 项目概述
 
 - **类型**: Home Assistant 自定义集成（BLE 防丢标签）
+- **芯片**: **KT6368A 双模蓝牙5.1 SoC（SOP-8封装）** - **专门适配**
 - **语言**: Python 3.11+
 - **主要依赖**: bleak >= 0.21.0, bleak-retry-connector >= 3.0.0
 - **代码位置**: `custom_components/anti_loss_tag/`
