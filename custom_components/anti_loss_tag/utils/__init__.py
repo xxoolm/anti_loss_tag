@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+# Copyright (c) 2025-2026 MMMM
+# See LICENSE file for details
 """工具函数模块。"""
 
 from __future__ import annotations

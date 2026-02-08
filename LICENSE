@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2025 MMMM
+Copyright (c) 2025-2026 MMMM
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -45,4 +45,3 @@ best practices.
 For implementation details, see:
 - `docs/技术文档/BLE协议实现指南.md` (BLE Protocol Implementation Guide)
 - `docs/技术文档/系统架构设计.md` (System Architecture Design)
-- `docs/风险排除修正整改方案.md` (Risk Remediation Plan)

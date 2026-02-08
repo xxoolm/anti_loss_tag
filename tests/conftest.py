@@ -1,4 +1,6 @@
 """测试配置文件."""
+# Copyright (c) 2025-2026 MMMM
+# See LICENSE file for details
 
 import sys
 from pathlib import Path

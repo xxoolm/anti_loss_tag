@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+# Copyright (c) 2025-2026 MMMM
+# See LICENSE file for details
 """弃用的协调器模块。
 
 此模块已被 device.py.AntiLossTagDevice 完全替代。

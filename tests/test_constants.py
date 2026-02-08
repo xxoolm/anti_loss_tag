@@ -1,4 +1,6 @@
 """测试常量定义."""
+# Copyright (c) 2025-2026 MMMM
+# See LICENSE file for details
 
 from custom_components.anti_loss_tag.utils.constants import (
     # BLE 配置

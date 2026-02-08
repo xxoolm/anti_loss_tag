@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+# Copyright (c) 2025-2026 MMMM
+# See LICENSE file for details
 """Shared entity mixins for AntiLossTag integration."""
 
 from __future__ import annotations

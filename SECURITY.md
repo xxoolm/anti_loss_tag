@@ -4,8 +4,8 @@
 
 如果您发现此项目中的安全漏洞，请通过以下方式报告：
 
-- **安全邮箱**: [待填写]
-- **GPG密钥**: [待填写，如有]
+- **GitHub Security Advisory**: 请使用 [Private Vulnerability Reporting](https://github.com/qq/anti_loss_tag/security/advisories) 功能提交漏洞报告（推荐）
+- **GPG密钥**: 不提供。本项目使用 GitHub Security Advisory，支持端到端加密通信
 
 请勿在公开issue中报告安全漏洞。
 

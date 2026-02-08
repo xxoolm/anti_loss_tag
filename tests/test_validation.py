@@ -1,4 +1,6 @@
 """测试输入验证工具."""
+# Copyright (c) 2025-2026 MMMM
+# See LICENSE file for details
 
 from custom_components.anti_loss_tag.utils.validation import (
     is_valid_ble_address,
