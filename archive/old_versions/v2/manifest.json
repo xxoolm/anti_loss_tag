@@ -1,0 +1,18 @@
+{
+  "domain": "anti_loss_tag",
+  "name": "BLE 防丢标签",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://example.com/anti_loss_tag",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "dependencies": ["bluetooth_adapters"],
+  "requirements": [],
+  "bluetooth": [
+    {
+      "service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb",
+      "connectable": true
+    }
+  ],
+  "codeowners": []
+}
