@@ -1,944 +1,392 @@
-# Home Assistant KT6368A 防丢标签集成 - 全面优化方案
+# Home Assistant KT6368A 防丢标签集成 - 优化方案（审校更正版）
 
 ## 文档信息
 
-- **版本**: v2.0.0 优化方案
-- **日期**: 2026-02-09
-- **基于**: 当前版本架构（v1.6.8+）
-- **目标**: 提升稳定性、健壮性、可维护性
+- 版本: v2.1.0（审校更正）
+- 日期: 2026-02-09
+- 适用范围: `custom_components/anti_loss_tag/`
+- 目标: 在现有架构上提升可靠性、可观测性、可测试性
 
 ---
 
-## 执行摘要
+## 0. 审核结论（基于官方文档 + 当前代码）
 
-本优化方案基于当前版本架构，在保持现有优秀设计的基础上，从**错误降级策略**、**防呆设计**、**边界设计**三个维度进行系统化优化。
+本次对旧版 `optimization_plan.md` 做了官方文档核对和技术纠偏，主要更正如下：
 
-### 优化原则
+1. 移除不准确或不可执行示例
+   - 原文包含无效Python标识符（如 `MULTI Characteristics`）和不可靠前提（依赖 `BleakError.code`）。
+   - 现改为可落地的实现建议：优先按异常类型分流，必要时保留消息关键词回退。
 
-1. **最小化改动**：在现有架构基础上优化，不破坏已有功能
-2. **向后兼容**：保持 API 和配置兼容性
-3. **渐进式实施**：按优先级分阶段实施
-4. **可测试性**：每个优化都应有对应的测试验证
+2. 与 Bleak 官方行为对齐
+   - 官方明确：同UUID多特征时，UUID寻址会失败，应使用特征对象（或先解析handle再读写）。
+   - `services` 仅在连接期间有效，且需完成服务发现。
+   - `write_gatt_char` 常见异常包含 `BleakCharacteristicNotFoundError` 和 `BleakGATTProtocolError`。
 
-### 预期收益
+3. 与 Home Assistant Integration Quality Scale 对齐
+   - 增补并强化以下规则落地：
+     - `log-when-unavailable`
+     - `parallel-updates`
+     - `runtime-data`
 
-- **稳定性提升**: 减少 80% 的连接失败和写入错误
-- **用户体验改善**: 减少实体不可用状态，提高响应速度
-- **可维护性增强**: 代码更清晰，问题定位更容易
-- **扩展性更好**: 更容易添加新功能和适配新设备
-
----
-
-## 一、错误降级策略优化
-
-### 1.1 当前错误处理机制分析
-
-#### 现有的多级降级流程
-
-```
-操作请求 → 检查连接 → 尝试写入 → 捕获错误 → 降级处理
-                                  ↓
-                          UUID 写入失败
-                                  ↓
-                    刷新服务 → 解析 handle → 重试写入
-                                  ↓
-                              仍然失败
-                                  ↓
-                          记录错误 → 更新状态
-```
-
-#### 优秀的现有设计 ✅
-
-1. **多特征 UUID 降级**
-   - 位置: `device.py:740-753, 805-819`
-   - 逻辑: UUID 写入失败 → 刷新服务 → handle 重试
-   - 优势: 兼容不同 BLE 设备实现
-
-2. **连接失败指数退避**
-   - 位置: `device.py:526-534`
-   - 逻辑: `2**self._connect_fail_count`，最大 `MAX_CONNECT_BACKOFF_SECONDS`
-   - 优势: 避免连接风暴，给设备恢复时间
-
-3. **服务发现失败回退**
-   - 位置: `device.py:496-498`
-   - 逻辑: 服务发现失败 → 立即释放连接 → 断开
-   - 优势: 防止占用资源
-
-#### 存在的问题 ⚠️
-
-1. **降级级数不足**
-   - 当前: UUID → handle → 失败
-   - 问题: handle 读写可能也会失败，缺少进一步降级
-
-2. **错误类型识别不精确**
-   - 当前: 检查错误消息字符串（`"Multiple Characteristics"`）
-   - 问题: 依赖 bleak 内部错误消息，不稳定
-
-3. **降级失败后的处理单一**
-   - 当前: 仅记录日志和更新 `_last_error`
-   - 问题: 没有自动恢复机制
-
-### 1.2 优化方案
-
-#### 优化 1.1: 增强降级策略 - 引入中间降级级
-
-**目标**: 在 UUID 和 handle 之间增加服务重启级
-
-**降级流程设计**:
-```
-Level 1: UUID 写入
-    ↓ 失败
-Level 2: 刷新服务 + UUID 重试
-    ↓ 失败
-Level 3: [新增] 断开重连 + UUID 重试
-    ↓ 失败
-Level 4: Handle 写入
-    ↓ 失败
-Level 5: [新增] 断开重连 + Handle 重试
-    ↓ 失败
-Level 6: 标记设备不可用，进入降级模式
-```
-
-**实施要点**:
-- 在 `_async_write_bytes` 中增加重连逻辑
-- 避免无限重连：最多 1 次完整重连
-- 记录降级路径到日志，便于诊断
-
-**预期效果**:
-- 解决设备状态异常导致的临时失败
-- 减少 30% 的写入错误
+4. 删除缺乏基线数据支撑的收益百分比
+   - 改为“可测量目标 + 验证方法”，避免拍脑袋数字。
 
 ---
 
-#### 优化 1.2: 错误类型精确识别
+## 1. 当前实现基线（来自现有代码）
 
-**目标**: 不依赖错误消息字符串，使用错误类型和状态码
+### 1.1 配置与选项
 
-**设计方案**:
+- 常量配置（`const.py`）
+  - `DEFAULT_MAINTAIN_CONNECTION = True`
+  - `DEFAULT_AUTO_RECONNECT = True`
+  - `DEFAULT_BATTERY_POLL_INTERVAL_MIN = 360`
+- Options Flow（`config_flow.py`）
+  - `battery_poll_interval_min` 已有限制：`5 ~ 10080` 分钟
 
-```python
-# 定义错误类型枚举
-class BleOperationError(Enum):
-    MULTI Characteristics = "multiple_uuid"
-    SERVICE_UNAVAILABLE = "service_unavailable"
-    DEVICE_DISCONNECTED = "device_disconnected"
-    WRITE_FAILED = "write_failed"
+### 1.2 连接与写入关键流程
 
-# 错误分类函数
-def classify_ble_error(error: Exception) -> BleOperationError | None:
-    """根据错误对象分类，不依赖消息字符串"""
-    # 检查错误类型
-    if isinstance(error, BleakError):
-        # 检查错误属性（ bleak 可能提供错误码）
-        if hasattr(error, 'code'):
-            return _map_error_code(error.code)
-        
-        # 回退到消息检查（保持兼容性）
-        error_str = str(error)
-        if "Multiple Characteristics" in error_str:
-            return BleOperationError.MULTIPLE_UUID
-        # ... 其他映射
-    
-    return None
-```
+- `async_ensure_connected()` 已有：连接锁、全局连接槽位、超时与退避
+- `_async_write_bytes()` 已有：
+  - 优先/降级 response 写入策略
+  - 同UUID多特征时刷新服务并解析handle重试
+- `async_read_battery()` 已有：读失败时按同逻辑降级重试
 
-**实施要点**:
-- 优先检查 bleak 的错误码（如果有）
-- 保留消息检查作为回退方案
-- 定义清晰的错误类型映射
+### 1.3 已修复关键回归
 
-**预期效果**:
-- 减少因 bleak 版本更新导致的匹配失败
-- 代码更健壮
+- “多特征UUID错误消息匹配”由中文判断改为英文关键词判断
+- 服务刷新由 `client.services` 改为 `await client.get_services()`
 
----
+### 1.4 旧版本可复用实践（来自 `/home/qq/anti_loss_tag_v2/`）
 
-#### 优化 1.3: 降级失败后的自动恢复
+以下实践已在旧版本验证有效，可作为本方案实施时的参考基线：
 
-**目标**: 设备进入降级模式后，尝试自动恢复
+1. `ble.py` 的单设备串行化模型
+   - `BleTagBle` 使用单个 `asyncio.Lock()` 串行化同设备的 connect/read/write。
+   - 优点：并发模型简单，竞态少，问题可定位。
 
-**设计方案**:
+2. `ble.py` 的短连接上下文管理
+   - 通过 `async with client:` 保证每次操作后释放连接。
+   - 优点：资源生命周期清晰，异常时不易遗留脏连接。
+   - 注意：当前主架构是长连接，不能直接回退为全量短连接；可用于“失败兜底路径”借鉴。
 
-1. **降级模式标记**
-   ```python
-   self._degraded_mode: bool = False
-   self._degraded_since: float = 0.0
-   ```
-
-2. **自动恢复机制**
-   - 在 `_async_battery_loop` 中检查降级模式
-   - 每 30 分钟尝试恢复正常操作
-   - 连续 3 次成功后退出降级模式
-
-3. **降级模式行为**
-   - 禁用非关键操作（报警、开关）
-   - 保留只读操作（电池读取）
-   - 降低连接重试频率
-
-**预期效果**:
-- 设备不会永久处于错误状态
-- 用户感知的故障时间减少
+3. `coordinator.py` 的在线状态重算与缓存策略
+   - 广播回调更新 RSSI/last_seen，统一经 `_recalc_online()` 计算在线状态。
+   - 电量读取使用时间缓存（`DEFAULT_BATTERY_CACHE_SECONDS`）降低GATT压力。
+   - 优点：状态更新单入口，行为可预测。
 
 ---
 
-### 1.3 实施优先级
+## 2. 优化目标（以可验证为准）
 
-| 优化项 | 优先级 | 复杂度 | 预期收益 |
-|--------|--------|--------|----------|
-| 1.1 中间降级级 | 高 | 中 | +30% 成功率 |
-| 1.2 错误类型识别 | 中 | 低 | +10% 稳定性 |
-| 1.3 自动恢复 | 中 | 中 | +15% 可用性 |
+不再使用主观百分比，改为以下可测目标：
 
----
-
-## 二、防呆设计增强
-
-### 2.1 当前防呆机制分析
-
-#### 现有的防呆设计 ✅
-
-1. **连接状态检查**
-   - 位置: `device.py:773, 785, 691, 716`
-   - 逻辑: `if self._client is None: raise BleakError`
-   - 优势: 防止在未连接时操作
-
-2. **参数验证**
-   - 位置: `device.py:691-699, 716-724`
-   - 逻辑: 检查 `force_connect` 参数决定是否重连
-   - 优势: 给调用者选择权
-
-3. **槽位获取超时**
-   - 位置: `device.py:458-463`
-   - 逻辑: `asyncio.wait_for(acquire, timeout=...)`
-   - 优势: 防止无限等待
-
-4. **特征缓存验证**
-   - 位置: `device.py:853-869`
-   - 逻辑: 检查 handle 是否有效
-   - 优势: 防止使用无效 handle
-
-#### 存在的问题 ⚠️
-
-1. **边界条件覆盖不全**
-   - 缺少对 `_cooldown_until_ts` 的检查
-   - 缺少对 `_connect_fail_count` 溢出的检查
-
-2. **参数类型验证不足**
-   - 某些方法缺少参数类型检查
-   - 依赖类型注解，运行时未验证
-
-3. **状态一致性验证缺失**
-   - `_connected` 和 `_client` 可能不一致
-   - 缺少状态断言
-
-### 2.2 优化方案
-
-#### 优化 2.1: 边界条件全覆盖
-
-**目标**: 确保所有边界条件都有检查
-
-**检查清单**:
-
-1. **冷却时间检查**
-   ```python
-   def _is_in_cooldown(self) -> bool:
-       """检查是否处于冷却期"""
-       return time.time() < self._cooldown_until_ts
-   ```
-   - 在 `async_ensure_connected` 开头检查
-   - 在冷却期内直接返回，不尝试连接
-
-2. **失败次数溢出保护**
-   ```python
-   # 当前已有 min() 限制
-   self._connect_fail_count = min(
-       self._connect_fail_count + 1, 
-       MAX_CONNECT_FAIL_COUNT
-   )
-   ```
-   - 已实现 ✅
-
-3. **缓存大小限制**
-   ```python
-   MAX_CACHED_CHARS = 50  # 防止缓存无限增长
-   
-   if len(self._cached_chars) >= MAX_CACHED_CHARS:
-       self._cached_chars.clear()
-   ```
-
-4. **并发操作保护**
-   ```python
-   # 使用锁防止并发写入
-   async with self._gatt_lock:
-       # 确保同一时间只有一个 GATT 操作
-   ```
-   - 已实现 ✅
-
-**实施要点**:
-- 在关键方法入口添加边界检查
-- 使用断言验证不变量
-- 添加防御性编程注释
+1. 稳定性目标
+   - 30分钟压力测试内，无未捕获异常导致实体长期不可用
+2. 可观测性目标
+   - 设备离线仅记录一次不可用日志，恢复时记录一次恢复日志
+3. 回归目标
+   - 针对“同UUID多特征”和“断连后写入”补齐自动化测试
+4. 兼容性目标
+   - 不改变现有配置键与实体唯一ID策略
 
 ---
 
-#### 优化 2.2: 参数验证增强
+## 3. 优化方案（纠偏后）
 
-**目标**: 在运行时验证关键参数
+### 3.1 错误降级与重试策略（高优先级）
 
-**设计方案**:
+#### A. 保留现有双通道写入策略并标准化
 
-1. **装饰器式验证**
-   ```python
-   def validate_BLE_address(func):
-       """装饰器：验证 BLE 地址格式"""
-       def wrapper(address: str, *args, **kwargs):
-           if not _is_valid_ble_address(address):
-               raise ValueError(f"Invalid BLE address: {address}")
-           return func(address, *args, **kwargs)
-       return wrapper
-   ```
+- 统一写入顺序：
+  1) 使用 `prefer_response`
+  2) 失败后反向 `not prefer_response`
+  3) 两次都失败则记录 `_last_error` 并抛出
+- 目的：减少不同固件对写入类型支持差异带来的失败。
 
-2. **关键参数验证**
-   - `force_connect`: 必须是 bool
-   - `battery_interval`: 必须 >= 60 秒
-   - UUID 字符串: 必须符合 UUID 格式
+#### B. 同UUID多特征处理策略收敛
 
-3. **早期失败（Fail Fast）**
-   - 在 `__init__` 中验证配置
-   - 在 API 入口验证参数
-   - 避免错误传播到深处
+- 官方依据：Bleak文档明确同UUID可能失败，建议特征对象/handle。
+- 实施要点：
+  - 保留当前“捕获错误后 `get_services()` + handle重试”路径。
+  - 进一步减少对错误消息文本依赖：
+    - 第一优先：已知异常类型（若版本可用）
+    - 第二优先：包含 `Multiple Characteristics` 关键词
+  - 将该逻辑封装为单独私有函数，读写共用，避免分叉回归。
 
-**预期效果**:
-- 减少 50% 的参数相关错误
-- 问题定位更快速
+#### C. 断连场景的一次性自愈重连
 
----
+- 场景：`_client is None` 且操作来自button/switch服务调用。
+- 策略：
+  - 在单次业务调用内最多触发一次 `async_ensure_connected()`。
+  - 若仍失败，返回明确错误，不进入无限重连。
 
-#### 优化 2.3: 状态一致性保证
+#### D. 引入“旧版短连接兜底”作为最后一层降级（可选）
 
-**目标**: 确保内部状态始终一致
+- 参考来源：旧版 `ble.py` 的 `async with client` 模式。
+- 建议策略：
+  - 仅在“长连接路径失败且本次调用允许重试”时，尝试一次短连接写入兜底。
+  - 兜底成功后回到主路径，不改变默认长连接策略。
+  - 兜底必须受 `_gatt_lock` 和重试次数上限约束，避免放大并发。
+- 适用场景：蓝牙栈临时状态异常、连接对象失效但地址可直连。
 
-**设计方案**:
+### 3.2 防呆与边界设计（高优先级）
 
-1. **状态不变量断言**
-   ```python
-   def _assert_invariants(self) -> None:
-       """断言内部状态不变量（仅调试模式）"""
-       if __debug__:
-           # 规则 1: 有客户端时必须已连接
-           if self._client is not None:
-               assert self._connected, "_client exists but not connected"
-           
-           # 规则 2: 已连接时必须有客户端
-           if self._connected:
-               assert self._client is not None, "connected but no _client"
-           
-           # 规则 3: 冷却期和失败次数一致
-           if self._is_in_cooldown():
-               assert self._connect_fail_count > 0, "cooldown without failures"
-   ```
+#### A. 并发边界明确化
 
-2. **状态转换日志**
-   ```python
-   def _set_connection_state(self, connected: bool) -> None:
-       """统一的状态转换方法"""
-       old_state = self._connected
-       self._connected = connected
-       
-       _LOGGER.debug(
-           "Connection state: %s → %s",
-           "CONNECTED" if old_state else "DISCONNECTED",
-           "CONNECTED" if connected else "DISCONNECTED"
-       )
-       
-       self._assert_invariants()
-   ```
+- 现有 `_gatt_lock` 继续作为单设备GATT串行化保证。
+- 将“可重入调用”入口统一到公共写接口，避免新功能绕过锁。
 
-3. **状态恢复机制**
-   - 如果检测到状态不一致，尝试恢复
-   - 强制断开并重置状态
+#### B. 状态一致性检查（轻量）
 
-**预期效果**:
-- 减少 40% 的状态相关 bug
-- 调试更容易
+- 在调试级日志中输出关键状态组合：
+  - `_connected`
+  - `_client is None`
+  - `_conn_slot_acquired`
+- 不建议在生产路径大量 `assert`，避免误触发导致服务中断。
 
----
+补充参考（旧版 `coordinator.py`）：
+- 建议将“在线状态计算”收敛为单入口函数，避免在多处分散修改在线标记。
+- 建议保留并明确“电量缓存窗口”语义，避免频繁读取导致设备负载上升。
 
-### 2.3 实施优先级
+#### C. 选项边界保持与补测
 
-| 优化项 | 优先级 | 复杂度 | 预期收益 |
-|--------|--------|--------|----------|
-| 2.1 边界条件全覆盖 | 高 | 低 | +20% 稳定性 |
-| 2.2 参数验证增强 | 中 | 中 | +15% 可靠性 |
-| 2.3 状态一致性保证 | 中 | 高 | +25% 可维护性 |
+- 保持 `battery_poll_interval_min` 的现有范围 `5~10080`。
+- 为极值增加测试：`5`、`10080`、非法值（<5、>10080、非整型）。
+
+### 3.3 Home Assistant 质量规则对齐（高优先级）
+
+#### A. `log-when-unavailable`
+
+- 要求：不可用时记录一次，恢复时记录一次，级别建议 `info`。
+- 落地：为设备对象增加“已记录不可用”标记位，避免日志刷屏。
+
+#### B. `parallel-updates`
+
+- 要求：显式设置 `PARALLEL_UPDATES`。
+- 落地建议：
+  - 读类平台可考虑 `PARALLEL_UPDATES = 0`（如果更新已集中管理）。
+  - 触发动作的平台根据设备能力限制为 `1` 更稳妥。
+
+#### C. `runtime-data`
+
+- 要求：运行时对象存放到 `ConfigEntry.runtime_data`。
+- 落地建议：将 `AntiLossTagDevice` / manager对象收敛到 `runtime_data`，减少 `hass.data` 分散状态。
 
 ---
 
-## 三、边界设计完善
+### 3.4 代码位置与关键优化点（逐文件、可执行）
 
-### 3.1 当前边界控制分析
+以下位置基于当前代码快照，实施时请以函数名优先定位，行号作为辅助。
 
-#### 现有的边界设计 ✅
+#### A. `custom_components/anti_loss_tag/device.py`
 
-1. **连接超时控制**
-   - `CONNECTION_SLOT_ACQUIRE_TIMEOUT = 20.0` 秒
-   - 防止无限等待槽位
+1. 连接生命周期与回调
+   - 位置：`_on_disconnect`（约 `device.py:416`）
+   - 关键点：
+     - 断连时必须原子清理 `_client`、连接槽位占用标记、特征缓存。
+     - 增加“不可用日志只打一次，恢复再打一条”的状态位（对齐 `log-when-unavailable`）。
+   - 验收：连续断连场景无日志刷屏；恢复后有单条恢复日志。
 
-2. **退避时间限制**
-   - `MAX_CONNECT_BACKOFF_SECONDS = 300` 秒（5分钟）
-   - `max_backoff = 2**self._connect_fail_count`
+2. 连接建立主路径
+   - 位置：`async_ensure_connected`（约 `device.py:446`）
+   - 关键点：
+     - 保持连接锁与全局连接槽位语义不变。
+     - 明确“单次调用最多一次自愈重连”，避免按钮/开关触发无限重试。
+     - 将“服务发现失败后的资源释放”作为硬约束（失败即释放槽位）。
+   - 验收：连接失败不泄漏槽位；重试次数受控；错误信息可操作。
 
-3. **失败次数限制**
-   - `MAX_CONNECT_FAIL_COUNT = 10`
-   - 防止指数无限增长
+3. 报警与策略写入入口
+   - 位置：
+     - `async_start_alarm`（约 `device.py:685`）
+     - `async_stop_alarm`（约 `device.py:693`）
+     - `async_set_disconnect_alarm_policy`（约 `device.py:701`）
+   - 关键点：
+     - 三个入口都必须收敛到统一写入通道 `_async_write_bytes`，不得新增绕过锁的写入路径。
+     - 断连下统一走“最多一次自愈重连 + 明确失败返回”。
+   - 验收：按钮/开关所有写入路径行为一致，失败语义一致。
 
-4. **电池轮询间隔**
-   - `DEFAULT_BATTERY_POLL_INTERVAL_MIN = 360` 分钟（6小时）
-   - 避免频繁轮询
+4. 电量读取
+   - 位置：`async_read_battery`（约 `device.py:718`）
+   - 关键点：
+     - 保留“同UUID多特征 -> `get_services()` -> handle重试”降级链。
+     - 明确 force_connect 行为边界：仅在调用方要求时主动连。
+     - 电量值继续夹紧 `0..100`，异常必须写 `_last_error`。
+   - 验收：多特征设备可稳定读取；非法电量不污染状态。
 
-#### 存在的问题 ⚠️
+5. 核心写入函数（最高优先）
+   - 位置：`_async_write_bytes`（约 `device.py:770`）
+   - 关键点：
+     - 固化写入顺序：`prefer_response` -> 反向 response。
+     - 同UUID多特征逻辑抽成单私有函数，读写共用，避免后续再分叉。
+     - 可选兜底：仅在本次调用内允许一次“短连接写入兜底”（参考旧版 `ble.py`），且必须受 `_gatt_lock` 与重试上限约束。
+   - 验收：
+     - `Multiple Characteristics` 场景可自动回退。
+     - 断连写入不会出现无限重试或锁竞争放大。
 
-1. **边界值硬编码**
-   - 超时值写死在代码中
-   - 难以针对不同设备调整
+6. 后台轮询
+   - 位置：`_async_battery_loop`（约 `device.py:832`）
+   - 关键点：
+     - 保留随机抖动，避免多设备同秒轮询。
+     - 捕获异常后仅更新错误状态，不允许任务静默退出（`CancelledError` 除外）。
+   - 验收：长时间运行任务稳定，不因偶发异常停止轮询。
 
-2. **缺少动态调整**
-   - 所有设备使用相同的边界值
-   - 未考虑设备特性（信号强度、距离等）
+#### B. `custom_components/anti_loss_tag/button.py`
 
-3. **边界条件测试不足**
-   - 缺少边界情况的单元测试
-   - 边界值变更影响评估困难
+1. 按钮动作调用链
+   - 位置：
+     - `AntiLossTagStartAlarmButton.async_press`（约 `button.py:57`）
+     - `AntiLossTagStopAlarmButton.async_press`（约 `button.py:67`）
+   - 关键点：
+     - 按钮仅调用 device 层API，不在实体层做连接逻辑。
+     - 明确错误透传策略：失败抛出由 HA 服务层处理，不吞异常。
+   - 验收：实体层保持薄封装，无重复连接代码。
 
-### 3.2 优化方案
+#### C. `custom_components/anti_loss_tag/switch.py`
 
-#### 优化 3.1: 可配置的边界参数
+1. 选项更新与设备写入一致性
+   - 位置：
+     - `async_turn_on`（约 `switch.py:48`）
+     - `async_turn_off`（约 `switch.py:58`）
+   - 关键点：
+     - `async_update_entry` 与设备写入的先后关系需明确（建议记录失败补偿策略）。
+     - 失败时要有可诊断日志，避免“UI已改但设备未改”无提示。
+   - 验收：配置与设备状态一致性可追踪，可回放。
 
-**目标**: 将硬编码的边界值改为可配置参数
+#### D. `custom_components/anti_loss_tag/config_flow.py`
 
-**设计方案**:
+1. 选项边界校验
+   - 位置：`OptionsFlowHandler.async_step_init`（约 `config_flow.py:167`，`vol.Range` 在约 `197`）
+   - 关键点：
+     - 保持 `battery_poll_interval_min` 范围 `5..10080`。
+     - 补齐边界测试：`5`、`10080`、`4`、`10081`、非整型。
+   - 验收：非法输入稳定拦截，错误提示明确。
 
-1. **配置参数扩展**
-   ```python
-   # 配置选项中新增
-   OPTIONS = {
-       "connection_timeout": {
-           "type": int,
-           "default": 20,
-           "min": 5,
-           "max": 60,
-           "unit": "seconds",
-           "description": "连接槽位获取超时时间"
-       },
-       "max_backoff_time": {
-           "type": int,
-           "default": 300,
-           "min": 60,
-           "max": 600,
-           "unit": "seconds",
-           "description": "最大退避时间"
-       },
-       "max_retry_count": {
-           "type": int,
-           "default": 10,
-           "min": 3,
-           "max": 20,
-           "description": "最大连接失败次数"
-       }
-   }
-   ```
+#### E. `custom_components/anti_loss_tag/__init__.py` 与运行时数据
 
-2. **动态边界调整**
-   - 根据设备 RSSI 调整超时时间
-   - 根据历史成功率调整重试次数
+1. runtime_data 与全局对象边界
+   - 位置：
+     - `entry.runtime_data = device`（约 `__init__.py:35`）
+     - `_conn_mgr` 初始化（约 `__init__.py:32`）
+   - 关键点：
+     - 设备实例继续走 `entry.runtime_data`（已符合 IQS）。
+     - `hass.data[DOMAIN]["_conn_mgr"]` 作为全局连接池可保留，但需文档明确“全局共享”的并发语义。
+   - 验收：多entry下连接池行为可预测，无跨设备污染。
 
-3. **边界值验证**
-   - 在 Options Flow 中验证参数范围
-   - 拒绝无效配置
+#### F. 平台并发声明（当前缺口）
 
-**预期效果**:
-- 适应不同设备环境
-- 减少 20% 的超时错误
+1. `PARALLEL_UPDATES`
+   - 位置：平台文件当前未声明（`grep` 结果为空）
+   - 涉及文件：`sensor.py`、`binary_sensor.py`、`switch.py`、`button.py`、`event.py`
+   - 关键点：
+     - 显式声明并发策略，避免默认行为不透明。
+     - 建议按平台能力设定（读类可偏保守，动作类建议 `1`）。
+   - 验收：并发行为可控，无突发并发写入导致的不稳定。
 
----
+#### G. 旧版本参考映射（仅作设计借鉴）
 
-#### 优化 3.2: 自适应退避策略
+1. `anti_loss_tag_v2/ble.py`
+   - 借鉴点：`asyncio.Lock` + `async with client` 的短连接兜底模式。
+   - 落地位置：`device.py::_async_write_bytes` 的最后一层可选降级。
 
-**目标**: 根据设备表现动态调整退避时间
-
-**设计方案**:
-
-1. **设备健康评分**
-   ```python
-   def _calculate_device_health(self) -> float:
-       """计算设备健康评分（0.0-1.0）"""
-       if self._total_attempts == 0:
-           return 1.0
-       
-       success_rate = self._successful_attempts / self._total_attempts
-       recent_failures = self._connect_fail_count
-       
-       # 健康评分 = 成功率 * (1 - 失败权重)
-       health = success_rate * (1.0 - min(recent_failures * 0.1, 0.5))
-       return max(0.0, min(health, 1.0))
-   ```
-
-2. **自适应退避**
-   ```python
-   def _apply_adaptive_backoff(self) -> int:
-       """根据设备健康度调整退避时间"""
-       health = self._calculate_device_health()
-       
-       # 健康设备：短退避
-       # 不健康设备：长退避
-       base_backoff = 2 ** self._connect_fail_count
-       health_factor = 2.0 - health  # 1.0-2.0
-       
-       backoff = min(
-           base_backoff * health_factor,
-           self._max_backoff_time
-       )
-       
-       return int(backoff)
-   ```
-
-3. **学习机制**
-   - 记录每次连接的结果
-   - 每 24 小时重置统计
-   - 避免短期波动影响长期策略
-
-**预期效果**:
-- 健康设备恢复更快
-- 问题设备干扰更少
+2. `anti_loss_tag_v2/coordinator.py`
+   - 借鉴点：`_recalc_online()` 单入口在线状态重算 + 电量缓存窗口。
+   - 落地位置：`device.py` 在线状态变更与轮询结果写回路径统一。
 
 ---
 
-#### 优化 3.3: 边界测试覆盖
+## 4. 分阶段实施计划
 
-**目标**: 确保所有边界条件都有测试覆盖
+### Phase 1（本周可完成）
 
-**测试清单**:
+1. 统一同UUID多特征降级逻辑为单一私有函数
+2. 为断连写入增加“单次调用一次重连”防护
+3. 增加不可用/恢复日志去重机制
+4. 新增单元测试：
+   - 同UUID读写重试
+   - `_client is None` 时写入行为
+   - `battery_poll_interval_min` 边界
+5. 增加“短连接兜底开关”设计评审（仅评审，不默认启用）
 
-1. **连接超时测试**
-   - 模拟槽位不可用场景
-   - 验证超时后正确释放
-   - 验证错误信息记录
+验收标准：
+- 新测试通过
+- 无新增 lint/type 错误
 
-2. **退避时间测试**
-   - 测试失败次数达到上限
-   - 验证退避时间不超过最大值
-   - 验证冷却时间正确计算
+### Phase 2（1-2周）
 
-3. **并发限制测试**
-   - 同时触发多个设备连接
-   - 验证 Semaphore 正确限制
-   - 验证槽位正确释放
+1. 对齐 `parallel-updates`
+2. 引入/收敛 `runtime_data`
+3. 梳理实体可用性状态更新路径（避免“假在线”）
+4. 将在线状态重算逻辑收敛为单入口（参考旧版 `_recalc_online` 思路）
 
-4. **参数边界测试**
-   - 测试最小/最大配置值
-   - 验证拒绝无效配置
-   - 验证默认值合理
+验收标准：
+- 配置加载/卸载流程无回归
+- 并发操作下无日志刷屏、无死锁
 
-**实施要点**:
-- 使用 pytest 和 pytest-asyncio
-- 模拟 bleak 错误
-- 覆盖率目标: 90%+
+### Phase 3（2周+）
 
-**预期效果**:
-- 减少 60% 的边界相关 bug
-- 回归测试保证
-
----
-
-### 3.3 实施优先级
-
-| 优化项 | 优先级 | 复杂度 | 预期收益 |
-|--------|--------|--------|----------|
-| 3.1 可配置边界参数 | 高 | 中 | +20% 适应性 |
-| 3.2 自适应退避策略 | 中 | 高 | +15% 智能化 |
-| 3.3 边界测试覆盖 | 高 | 中 | +30% 可靠性 |
+1. 增加 diagnostics 与故障快照能力（按HA规范）
+2. 增强集成测试（多设备并发、长时间稳定性）
+3. 文档补齐：已知限制、故障排查、数据更新机制
 
 ---
 
-## 四、综合优化方案
+## 5. 风险与非目标
 
-### 4.1 优化实施路线图
+### 风险
 
-#### 阶段 1: 快速修复（1-2 周）
+1. 不同平台Bleak后端异常行为差异（BlueZ/CoreBluetooth/WinRT）
+2. 过度重试导致设备侧负载升高
+3. 日志治理不当导致问题定位信息不足或刷屏
 
-**目标**: 修复明显的边界条件和错误处理问题
+### 非目标（本方案不做）
 
-**任务清单**:
-- [ ] 优化 1.2: 错误类型精确识别
-- [ ] 优化 2.1: 边界条件全覆盖
-- [ ] 优化 3.3: 边界测试覆盖（基础）
-
-**预期成果**:
-- 错误识别准确率提升 10%
-- 边界错误减少 20%
+1. 不引入复杂自学习算法（如动态健康评分）
+2. 不改动现有配置键命名与存储结构
+3. 不在无证据前提下承诺固定百分比收益
 
 ---
 
-#### 阶段 2: 增强降级策略（2-3 周）
+## 6. 验证与交付清单
 
-**目标**: 引入中间降级级和自动恢复机制
+### 6.1 开发验证
 
-**任务清单**:
-- [ ] 优化 1.1: 增强降级策略
-- [ ] 优化 1.3: 降级失败后的自动恢复
-- [ ] 优化 2.3: 状态一致性保证
+- `ruff check custom_components/anti_loss_tag/`
+- `mypy custom_components/anti_loss_tag/`
+- `pytest tests/ -v`
 
-**预期成果**:
-- 写入成功率提升 30%
-- 设备可用时间提升 15%
+### 6.2 场景验证
 
----
+1. 设备断连后触发按钮/开关写入，确认可自愈或给出可操作错误
+2. 同UUID多特征设备上，读写可回退到handle路径
+3. 设备离线/恢复日志各仅一次
 
-#### 阶段 3: 智能化优化（3-4 周）
+### 6.3 发布前检查
 
-**目标**: 引入自适应机制和可配置参数
-
-**任务清单**:
-- [ ] 优化 2.2: 参数验证增强
-- [ ] 优化 3.1: 可配置边界参数
-- [ ] 优化 3.2: 自适应退避策略
-- [ ] 优化 3.3: 边界测试覆盖（完整）
-
-**预期成果**:
-- 适应性提升 20%
-- 用户体验改善
+1. `manifest.json` / `pyproject.toml` 版本一致
+2. 新增测试随变更同提交
+3. 文档同步更新
 
 ---
 
-### 4.2 风险评估与缓解
+## 7. 参考依据（官方）
 
-#### 风险 1: 优化引入新 Bug
-
-**影响**: 中等  
-**概率**: 低
-
-**缓解措施**:
-- 充分的单元测试和集成测试
-- 分阶段发布，逐步推广
-- 保留快速回滚机制
-
----
-
-#### 风险 2: 性能下降
-
-**影响**: 中等  
-**概率**: 低
-
-**缓解措施**:
-- 性能基准测试
-- 代码审查
-- 异步操作不阻塞主循环
+1. Bleak Usage
+   - https://bleak.readthedocs.io/en/latest/usage.html
+2. Bleak Client API
+   - https://bleak.readthedocs.io/en/latest/api/client.html
+3. Home Assistant Integration Quality Scale - Rules
+   - https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/
+4. HA `log-when-unavailable`
+   - https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/log-when-unavailable/
+5. HA `parallel-updates`
+   - https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/parallel-updates/
+6. HA `runtime-data`
+   - https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/runtime-data/
 
 ---
 
-#### 风险 3: 兼容性问题
+## 8. 备注
 
-**影响**: 高  
-**概率**: 中
-
-**缓解措施**:
-- 保持 API 向后兼容
-- 配置迁移方案
-- 文档更新
-
----
-
-### 4.3 验证方案
-
-#### 测试策略
-
-1. **单元测试**
-   - 覆盖所有新增和修改的方法
-   - 使用 mock 模拟 bleak 错误
-   - 边界条件测试
-
-2. **集成测试**
-   - 完整的连接生命周期
-   - 多设备并发测试
-   - 降级和恢复流程
-
-3. **压力测试**
-   - 长时间运行稳定性
-   - 大量设备并发
-   - 异常恢复能力
-
-4. **实际设备测试**
-   - KT6368A 真实设备
-   - 不同信号强度环境
-   - 不同距离测试
-
----
-
-#### 验收标准
-
-| 指标 | 当前值 | 目标值 | 测量方法 |
-|------|--------|--------|----------|
-| 连接成功率 | ~85% | >95% | 日志统计 |
-| 写入成功率 | ~80% | >95% | 日志统计 |
-| 平均恢复时间 | ~5分钟 | <2分钟 | 时间戳分析 |
-| 错误率 | ~15% | <5% | 错误日志统计 |
-| 测试覆盖率 | ~60% | >90% | pytest-cov |
-
----
-
-## 五、设计模式参考
-
-### 5.1 错误处理模式
-
-#### 模式 1: 断路器模式（Circuit Breaker）
-
-**应用场景**: 设备频繁失败时暂时停止尝试
-
-```python
-class CircuitBreaker:
-    """断路器：防止持续失败的操作"""
-    
-    CLOSED = "closed"      # 正常工作
-    OPEN = "open"          # 断开，不尝试
-    HALF_OPEN = "half_open"  # 半开，尝试恢复
-    
-    def __init__(self, failure_threshold: int, timeout: int):
-        self._state = self.CLOSED
-        self._failure_count = 0
-        self._failure_threshold = failure_threshold
-        self._timeout = timeout
-        self._last_failure_time = 0
-    
-    def call(self, func):
-        """执行操作，自动管理断路器状态"""
-        if self._state == self.OPEN:
-            if time.time() - self._last_failure_time > self._timeout:
-                self._state = self.HALF_OPEN
-            else:
-                raise CircuitBreakerOpenError()
-        
-        try:
-            result = func()
-            if self._state == self.HALF_OPEN:
-                self._state = self.CLOSED
-                self._failure_count = 0
-            return result
-        except Exception as err:
-            self._failure_count += 1
-            self._last_failure_time = time.time()
-            
-            if self._failure_count >= self._failure_threshold:
-                self._state = self.OPEN
-            
-            raise err
-```
-
----
-
-#### 模式 2: 重试模板（Retry Template）
-
-**应用场景**: 统一的重试逻辑
-
-```python
-class RetryTemplate:
-    """重试模板：封装重试逻辑"""
-    
-    def __init__(
-        self,
-        max_attempts: int,
-        backoff: Callable[[int], float],
-        retryable: Callable[[Exception], bool]
-    ):
-        self._max_attempts = max_attempts
-        self._backoff = backoff
-        self._retryable = retryable
-    
-    async def execute(self, operation: Callable):
-        """执行操作，根据策略重试"""
-        last_error = None
-        
-        for attempt in range(self._max_attempts):
-            try:
-                return await operation()
-            except Exception as err:
-                last_error = err
-                
-                if not self._retryable(err):
-                    raise err  # 不可重试，直接失败
-                
-                if attempt < self._max_attempts - 1:
-                    backoff_time = self._backoff(attempt)
-                    _LOGGER.debug(
-                        "Attempt %d failed, retrying in %.1fs: %s",
-                        attempt + 1, backoff_time, err
-                    )
-                    await asyncio.sleep(backoff_time)
-        
-        raise last_error
-```
-
----
-
-### 5.2 状态管理模式
-
-#### 模式 3: 状态机（State Machine）
-
-**应用场景**: 管理复杂的连接状态转换
-
-```python
-class ConnectionState:
-    """连接状态机"""
-    
-    DISCONNECTED = "disconnected"
-    CONNECTING = "connecting"
-    CONNECTED = "connected"
-    DISCONNECTING = "disconnecting"
-    DEGRADED = "degraded"
-    
-    # 允许的状态转换
-    TRANSITIONS = {
-        DISCONNECTED: [CONNECTING],
-        CONNECTING: [CONNECTED, DISCONNECTED, DEGRADED],
-        CONNECTED: [DISCONNECTING, DEGRADED],
-        DISCONNECTING: [DISCONNECTED],
-        DEGRADED: [CONNECTED, DISCONNECTING]
-    }
-    
-    def __init__(self):
-        self._state = self.DISCONNECTED
-        self._state_listeners = []
-    
-    def transition_to(self, new_state: str) -> bool:
-        """转移到新状态"""
-        if new_state not in self.TRANSITIONS[self._state]:
-            _LOGGER.error(
-                "Invalid state transition: %s → %s",
-                self._state, new_state
-            )
-            return False
-        
-        old_state = self._state
-        self._state = new_state
-        
-        for listener in self._state_listeners:
-            listener(old_state, new_state)
-        
-        return True
-```
-
----
-
-## 六、实施建议
-
-### 6.1 开发流程
-
-1. **创建优化分支**
-   ```bash
-   git checkout -b optimize/error-handling-v2
-   ```
-
-2. **开发和测试**
-   - 每个优化项单独开发
-   - 编写对应的单元测试
-   - 本地验证通过后再提交
-
-3. **代码审查**
-   - 至少一人审查
-   - 检查测试覆盖率
-   - 确认文档更新
-
-4. **合并和发布**
-   - 合并到主分支
-   - 更新版本号
-   - 创建 git tag
-
----
-
-### 6.2 文档更新
-
-需要更新的文档：
-
-1. **代码文档**
-   - 更新新增方法的 docstring
-   - 更新配置选项说明
-
-2. **用户文档**
-   - 更新 README 中的配置说明
-   - 添加故障排查指南
-
-3. **开发者文档**
-   - 更新架构设计文档
-   - 更新测试指南
-
----
-
-### 6.3 监控和反馈
-
-1. **日志增强**
-   - 结构化日志输出
-   - 关键操作的时间戳
-   - 错误分类统计
-
-2. **指标收集**
-   - 连接成功率
-   - 写入成功率
-   - 平均恢复时间
-   - 降级模式频率
-
-3. **用户反馈**
-   - 收集实际使用问题
-   - 分析 GitHub issues
-   - 定期优化调整
-
----
-
-## 七、总结
-
-### 核心优化点
-
-1. **错误降级策略**
-   - 引入中间降级级
-   - 精确错误类型识别
-   - 自动恢复机制
-
-2. **防呆设计**
-   - 边界条件全覆盖
-   - 参数验证增强
-   - 状态一致性保证
-
-3. **边界设计**
-   - 可配置边界参数
-   - 自适应退避策略
-   - 完整的测试覆盖
-
-### 预期收益
-
-| 维度 | 改进幅度 | 说明 |
-|------|----------|------|
-| 稳定性 | +40% | 减少连接和写入失败 |
-| 用户体验 | +30% | 减少实体不可用时间 |
-| 可维护性 | +50% | 代码更清晰，问题更容易定位 |
-| 扩展性 | +20% | 更容易适配新设备 |
-
-### 下一步行动
-
-1. **评审本优化方案**
-   - 团队讨论
-   - 优先级排序
-   - 资源评估
-
-2. **创建实施计划**
-   - 分配任务
-   - 设置里程碑
-   - 安排排期
-
-3. **开始实施**
-   - 从快速修复开始
-   - 逐步推进
-   - 持续验证
-
----
-
-**文档版本**: v1.0  
-**最后更新**: 2026-02-09  
-**维护者**: 开发团队
+- 本文档为“审校更正版本”，用于替代旧版中不准确示例与未经验证的收益描述。
+- 若后续实施代码改动，请按“每次变更同步版本号 + 测试证明”流程执行。
