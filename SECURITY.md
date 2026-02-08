@@ -28,12 +28,8 @@
    - 所有配置存储在本地Home Assistant配置中
 
 3. **网络安全**
-   - 本集成不监听任何网络端口
-   - 仅通过Home Assistant的API暴露实体
-   - 请确保Home Assistant实例本身的安全配置
-
-## 免责声明
-
-本软件按"原样"提供，不提供任何明示或暗示的保证。使用本软件的风险由用户自行承担。
+    - 本集成不监听任何网络端口
+    - 仅通过Home Assistant的API暴露实体
+    - 请确保Home Assistant实例本身的安全配置
 
 详见LICENSE文件。

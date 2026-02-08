@@ -340,7 +340,7 @@ HACS需要特定的配置文件来识别集成类型和设置：
 #### Home Assistant Brands注册
 
 - 必须将集成添加到 [home-assistant/brands](https://github.com/home-assistant/brands) 仓库
-- 这确保集成符合Home Assistant的UI标准和图标显示
+- 符合Home Assistant的UI标准和图标显示
 
 #### GitHub Releases（可选但推荐）
 
