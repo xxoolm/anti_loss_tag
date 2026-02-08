@@ -297,23 +297,154 @@ python3 -m compileall custom_components/your_integration
 
 ## 7. 发布流程
 
-### 7.1 HACS要求
-- Public GitHub仓库
-- Valid hacs.json
-- Valid manifest.json
-- 至少一个release
-- 注册在home-assistant/brands
+### 7.1 HACS发布要求
 
-### 7.2 质量标准
-- Bronze级别（最低）
-  - 配置流程完成
-  - 基本功能工作
-  - 基本文档
+#### 仓库结构要求
 
-- Silver级别（推荐）
-  - 完整文档
-  - 诊断信息
-  - 故障排除指南
+- 每个仓库只能包含一个集成
+- 所有集成文件必须在 `custom_components/<INTEGRATION_NAME>/` 目录下
+- 仓库根目录可包含README.md、LICENSE等文件
+
+**正确示例**：
+```
+custom_components/anti_loss_tag/
+├── __init__.py
+├── manifest.json
+├── config_flow.py
+└── ...
+README.md                # 仓库根目录
+hacs.json               # HACS配置
+LICENSE                 # 许可证
+```
+
+#### manifest.json必需字段
+
+所有集成必须在manifest.json中定义以下字段：
+- `domain` - 域名（唯一标识符，如"anti_loss_tag"）
+- `name` - 显示名称
+- `documentation` - 文档链接（https://...）
+- `issue_tracker` - 问题跟踪器（https://github.com/.../issues）
+- `codeowners` - GitHub用户名列表（至少一个，如["@username"]）
+- `version` - 版本号（如"1.0.0"）
+
+#### hacs.json配置
+
+HACS需要特定的配置文件来识别集成类型和设置：
+```json
+{
+  "name": "Anti Loss Tag",
+  "render_readme": true
+}
+```
+
+#### Home Assistant Brands注册
+
+- 必须将集成添加到 [home-assistant/brands](https://github.com/home-assistant/brands) 仓库
+- 这确保集成符合Home Assistant的UI标准和图标显示
+
+#### GitHub Releases（可选但推荐）
+
+- 如果发布GitHub releases，HACS会向用户展示最近5个版本供选择
+- 如果不发布releases，HACS使用标记为default的分支文件
+- 推荐创建releases以提供更好的用户体验
+
+#### HACS Action验证
+
+使用 [HACS GitHub Action](https://hacs.xyz/docs/publish/action/) 自动验证仓库是否符合要求
+
+### 7.2 HACS质量标准
+
+HACS使用[集成质量量表](https://developers.home-assistant.io/docs/core/integration-quality-scale/)评估集成质量。
+
+#### Bronze级别（最低要求）
+
+集成在HACS发布的最低标准：
+- 配置流程完整可用
+- 基本功能正常工作
+- 有基本文档说明（README）
+- manifest.json包含必需字段
+
+#### Silver级别（推荐标准）
+
+大多数高质量集成应达到的标准：
+- 完整的用户文档（安装、配置、使用）
+- 提供诊断信息
+- 包含故障排除指南
+- 有适当的错误处理
+- 使用DataUpdateCoordinator或类似模式
+
+#### Gold级别（优秀标准）
+
+顶级集成的标杆：
+- 完整的自动化测试（pytest）
+- 持续集成（GitHub Actions）
+- 代码覆盖率报告
+- 符合Home Assistant代码风格
+- 完整的API文档
+- 活跃维护和快速响应
+
+### 7.3 发布到HACS的完整流程
+
+#### 步骤1：准备仓库
+
+1. 确保仓库结构符合HACS要求
+2. 创建并配置manifest.json
+3. 创建hacs.json配置文件
+4. 编写README.md文档
+5. 添加LICENSE文件
+
+#### 步骤2：配置manifest.json
+
+确保包含所有必需字段：
+```json
+{
+  "domain": "anti_loss_tag",
+  "name": "BLE 防丢标签",
+  "documentation": "https://github.com/yourusername/anti_loss_tag",
+  "issue_tracker": "https://github.com/yourusername/anti_loss_tag/issues",
+  "codeowners": ["@yourusername"],
+  "version": "1.0.0",
+  "config_flow": true,
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "requirements": ["bleak>=0.21.0", "bleak-retry-connector>=3.0.0"]
+}
+```
+
+#### 步骤3：注册到Home Assistant Brands
+
+1. Fork [home-assistant/brands](https://github.com/home-assistant/brands)仓库
+2. 在`brands/`目录下添加你的品牌文件
+3. 提交Pull Request
+4. 等待合并
+
+#### 步骤4：创建GitHub Release（可选但推荐）
+
+1. 在GitHub仓库中创建新release
+2. 使用语义化版本号（如v1.0.0）
+3. 添加release notes描述变更
+4. 标记对应的commit
+
+#### 步骤5：提交到HACS Default（可选）
+
+如果希望集成在HACS默认列表中显示：
+
+1. Fork [hacs/default](https://github.com/hacs/default)仓库
+2. 在`integration/`目录下添加你的仓库信息
+3. 提交Pull Request
+4. 等待审核和合并
+
+参考：[https://hacs.xyz/docs/publish/include/](https://hacs.xyz/docs/publish/include/)
+
+#### 步骤6：使用HACS Action验证
+
+在GitHub仓库中启用HACS Action以自动验证：
+- 仓库结构
+- manifest.json有效性
+- hacs.json配置
+- 代码质量
+
+参考：[https://hacs.xyz/docs/publish/action/](https://hacs.xyz/docs/publish/action/)
 
 ---
 
@@ -356,6 +487,23 @@ python3 -m compileall custom_components/your_integration
 - [example-custom-config](https://github.com/home-assistant/example-custom-config)
 - [integration_blueprint](https://github.com/jpawlowski/hacs.integration_blueprint)
 - [bleak-retry-connector](https://github.com/Bluetooth-Devices/bleak-retry-connector)
+
+### 9.4 HACS发布相关资源
+
+**官方资源**：
+- [HACS Documentation](https://hacs.xyz/) - HACS完整文档
+- [HACS Publisher Guide](https://hacs.xyz/docs/publish/) - 发布者指南
+- [HACS Integration Requirements](https://hacs.xyz/docs/publish/integration/) - 集成发布要求
+- [HACS GitHub Action](https://hacs.xyz/docs/publish/action/) - 验证工具
+
+**GitHub仓库**：
+- [hacs/integration](https://github.com/hacs/integration) - HACS核心集成（7.1k stars）
+- [hacs/default](https://github.com/hacs/default) - HACS默认仓库列表（538 stars）
+- [home-assistant/brands](https://github.com/home-assistant/brands) - Home Assistant品牌注册
+
+**社区资源**：
+- [HACS Discord](https://discord.gg/apgchf8) - 社区支持
+- [integration_blueprint](https://github.com/jpawlowski/hacs.integration_blueprint) - 集成模板
 
 ---
 
