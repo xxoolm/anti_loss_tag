@@ -22,10 +22,10 @@ SOFTWARE.
 
 ---
 
-## Third-Party Code Statement
+## Implementation Basis
 
-This project does not contain any third-party code. All implementations are
-original work based on the following public standards and documentation:
+All current implementations are based on the following public standards and
+documentation:
 
 - Bluetooth Core Specification 5.1 (GATT protocol definitions)
 - KT6368A chip public specification documents (FFE0/FFE1/FFE2 services)
@@ -34,7 +34,13 @@ original work based on the following public standards and documentation:
 - Python asyncio programming best practices
 
 Reference materials are documented in `docs/参考资料/` for educational purposes
-only. No proprietary code has been copied or adapted from third-party sources.
+only. The codebase contains only original implementations derived from these
+public standards.
+
+**Git History Note**: As of 2026-02-08, the Git history has been cleaned using
+git-filter-repo to remove all previously referenced third-party code and
+sensitive files. The current codebase is fully compliant with open-source
+best practices.
 
 For implementation details, see:
 - `docs/技术文档/BLE协议实现指南.md` (BLE Protocol Implementation Guide)
