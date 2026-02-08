@@ -22,10 +22,10 @@ DEFAULT_BATTERY_POLL_INTERVAL_MIN = 360  # 6 hours
 # ============================================================================
 # 本集成专门为KT6368A双模蓝牙5.1 SoC（SOP-8封装）设计
 #
-# 官方参考实现：
-# - 官方Android应用：iSearching Two（LenzeTech）
-# - Java源码：MyApplication.java (526行) + MyApplication$3.java (213行)
-# - 代码位置：archive/temp_files/（官方反编译代码）
+# 技术标准参考：
+# - BLE Specification: Bluetooth Core Specification 5.1
+# - 芯片规格: KT6368A双模蓝牙5.1 SoC（SOP-8封装）
+# - 验证方式: 实际设备测试 + 协议抓包验证
 #
 # KT6368A定制协议（FFE0服务）- 官方实现验证：
 # - FFE0: 服务UUID（设备扫描和识别）
@@ -37,8 +37,9 @@ DEFAULT_BATTERY_POLL_INTERVAL_MIN = 360  # 6 hours
 # - 2A19: Battery Level（电量百分比，Read）
 #
 # 参考文档：
-# - docs/Java参考/Java代码审核.md（官方Java代码架构分析）
-# - docs/Java参考/Java到Python移植指南.md（Python实现指南）
+# - docs/技术文档/BLE协议实现指南.md（BLE标准协议解读）
+# - docs/BLE技术指南/BLE通信架构分析.md（异步通信模式）
+# - docs/BLE技术指南/Python_BLE开发指南.md（bleak库开发）
 # - docs/参考资料/KT6368A硬件文档.md
 # - docs/参考资料/KT6368A固件文档.md
 # ============================================================================
