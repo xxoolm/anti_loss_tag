@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """常量定义模块。"""
 
 from __future__ import annotations
