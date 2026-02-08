@@ -103,8 +103,8 @@ git push origin archive-reference --no-verify
 
 - [ ] 分支内容已清理风险内容
 - [ ] 不包含第三方代码或敏感信息
-- [ ] 不包含 LenzeTech/Java 引用
-- [ ] 符合法律合规要求
+- [x] 不包含 LenzeTech/Java 引用（v1.6.3已完成）
+- [x] 符合法律合规要求（v1.6.3验证通过）
 - [ ] 已阅读并理解 `docs/风险排除修正整改方案.md`
 - [ ] 如推送 archive-reference，了解相关风险并使用 `--no-verify`
 
