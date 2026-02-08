@@ -23,6 +23,7 @@ class AntiLossTagButtonEventEntity(AntiLossTagEntityMixin, EventEntity):
     _attr_has_entity_name = True
     _attr_device_class = EventDeviceClass.BUTTON
     _attr_event_types = ["press"]
+    _attr_parallel_updates = 1
 
     def __init__(self, device: AntiLossTagDevice) -> None:
         self._dev = device

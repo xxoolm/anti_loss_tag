@@ -30,6 +30,7 @@ async def async_setup_entry(
 
 class _AntiLossTagBinaryBase(AntiLossTagEntityMixin, BinarySensorEntity):
     _attr_has_entity_name = True
+    _attr_parallel_updates = 0
 
     def __init__(self, device: AntiLossTagDevice) -> None:
         self._dev = device

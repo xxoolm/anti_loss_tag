@@ -25,6 +25,7 @@ async def async_setup_entry(
 class AntiLossTagDisconnectAlarmPolicySwitch(AntiLossTagEntityMixin, SwitchEntity):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
+    _attr_parallel_updates = 1
 
     def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
         self._dev = device

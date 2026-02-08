@@ -333,6 +333,23 @@ class AntiLossTagDevice:
     # -------------------------
     # Bluetooth callbacks
     # -------------------------
+    def _update_availability(self, available: bool) -> None:
+        """Update device availability state (single entry point).
+
+        This is the only method that should modify _available, ensuring
+        consistency and making it easier to track availability changes.
+
+        Args:
+            available: True if device is available, False otherwise
+        """
+        if self._available != available:
+            self._available = available
+            _LOGGER.debug(
+                "Device %s availability changed: %s",
+                self.address,
+                "AVAILABLE" if available else "UNAVAILABLE",
+            )
+
     @callback
     def _async_on_bluetooth_event(
         self,
@@ -340,7 +357,7 @@ class AntiLossTagDevice:
         change: bluetooth.BluetoothChange,
     ) -> None:
         """Handle advertisement updates."""
-        self._available = True
+        self._update_availability(True)
         self._rssi = service_info.rssi
         self._last_seen = datetime.now(timezone.utc)
 
@@ -352,7 +369,7 @@ class AntiLossTagDevice:
     @callback
     def _async_on_unavailable(self, info: bluetooth.BluetoothServiceInfoBleak) -> None:
         """Handle device no longer seen (may take time to trigger)."""
-        self._available = False
+        self._update_availability(False)
         self._async_dispatch_update()
 
         # If we lose advertisements, the connection likely isn't valid anymore
@@ -393,11 +410,11 @@ class AntiLossTagDevice:
         """
         if self._conn_mgr is not None and self._conn_slot_acquired:
             self._conn_slot_acquired = False
-            # 添加错误处理，防止任务创建失败导致槽位泄漏
+            # Add error handling to prevent slot leakage on task creation failure
             try:
                 task = self.hass.async_create_task(self._release_connection_slot())
 
-                # 添加完成回调，捕获任务中的异常
+                # Add completion callback to catch exceptions in task
                 def _task_done(t: asyncio.Task) -> None:
                     try:
                         t.exception()

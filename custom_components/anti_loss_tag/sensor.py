@@ -37,6 +37,8 @@ async def async_setup_entry(
 class _AntiLossTagSensorBase(AntiLossTagEntityMixin, SensorEntity):
     """Base class for AntiLossTag sensors."""
 
+    _attr_parallel_updates = 0
+
     def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
         self._dev = device
         self._entry = entry
