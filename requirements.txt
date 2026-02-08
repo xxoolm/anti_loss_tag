@@ -1,0 +1,6 @@
+# Runtime dependencies (minimum versions)
+bleak>=0.21.0
+bleak-retry-connector>=3.0.0
+
+# Home Assistant (provided by HA, listed for reference)
+# homeassistant>=2024.1.0
