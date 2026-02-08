@@ -152,8 +152,8 @@
 |  KT6368A 硬件 | 硬件文档 | [docs/参考资料/KT6368A硬件文档.md](docs/参考资料/KT6368A硬件文档.md) |
 |  KT6368A 固件 | 固件文档 | [docs/参考资料/KT6368A固件文档.md](docs/参考资料/KT6368A固件文档.md) |
 |  Manifest 2025 | HA 标准 | [docs/参考资料/Manifest2025标准.md](docs/参考资料/Manifest2025标准.md) |
-|  Java 代码审核 | Java 参考 | [docs/Java参考/Java代码审核.md](docs/Java参考/Java代码审核.md) |
-|  Java 移植指南 | Java 参考 | [docs/Java参考/Java到Python移植指南.md](docs/Java参考/Java到Python移植指南.md) |
+|  BLE协议实现指南 | 技术文档 | [docs/技术文档/BLE协议实现指南.md](docs/技术文档/BLE协议实现指南.md) |
+|  系统架构设计 | 技术文档 | [docs/技术文档/系统架构设计.md](docs/技术文档/系统架构设计.md) |
 
 ##  技术架构
 
@@ -208,32 +208,28 @@
 
 ### 官方参考实现
 
-本项目基于LenzeTech官方Android应用（iSearching Two）的BLE协议实现进行移植。
+本项目基于BLE核心规范和KT6368A芯片公开规格文档实现。
 
-**官方代码信息**：
-- 应用名称：iSearching Two
-- 开发商：LenzeTech（深圳岚至科技）
-- 代码来源：archive/temp_files/MyApplication.java (526行) + MyApplication$3.java (213行)
-- 代码类型：官方Android应用反编译代码（生产级验证）
-- 反编译工具：Jadx
+### 技术标准
 
-**关键协议验证**：
-- FFE0服务UUID：官方扫描过滤实现
-- FFE1通知特征：官方按钮事件处理（第115行代码验证）
-- FFE2写入特征：官方断开报警策略实现（第120-128行）
-- 2A06/2A19：标准UUID在KT6368A固件中的实现
+- **BLE规范**: Bluetooth Core Specification 5.1
+- **芯片规格**: KT6368A双模蓝牙5.1 SoC数据手册
+- **服务定义**: FFE0（主服务）、FFE1（通知）、FFE2（写入）
+- **验证方式**: 实际设备测试 + BLE抓包分析
 
-**架构借鉴**：
-- 单例模式：全局BLE设备管理器
-- 观察者模式：事件驱动架构
-- 重连策略：指数退避算法（5次重连）
-- 状态管理：多HashMap集群管理
+### 协议实现
 
-**参考文档**：
-- [Java代码审核](docs/Java参考/Java代码审核.md) - 官方代码架构分析
-- [Java到Python移植指南](docs/Java参考/Java到Python移植指南.md) - Python实现参考
-- [KT6368A硬件文档](docs/参考资料/KT6368A硬件文档.md) - 芯片规格和引脚定义
-- [KT6368A固件文档](docs/参考资料/KT6368A固件文档.md) - FFE0/FFE1/FFE2协议详细说明
+- **服务发现**: 自动发现FFE0/FFE1/FFE2服务
+- **特征读写**: 支持所有GATT操作（Read/Write/Notify）
+- **连接管理**: 异步连接、自动重连、状态监控
+- **报警控制**: 远程配置距离、静音、开关
+
+### 参考文档
+
+- [BLE协议实现指南](docs/技术文档/BLE协议实现指南.md) - 标准协议解读
+- [系统架构设计](docs/技术文档/系统架构设计.md) - 系统设计说明
+- [KT6368A固件文档](docs/参考资料/KT6368A固件文档.md) - 芯片规格参考
+- [KT6368A硬件文档](docs/参考资料/KT6368A硬件文档.md) - 硬件设计参考
 
 ##  技术方向
 
