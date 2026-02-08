@@ -37,11 +37,6 @@ Reference materials are documented in `docs/参考资料/` for educational purpo
 only. The codebase contains only original implementations derived from these
 public standards.
 
-**Git History Note**: As of 2026-02-08, the Git history has been cleaned using
-git-filter-repo to remove all previously referenced third-party code and
-sensitive files. The current codebase is fully compliant with open-source
-best practices.
-
 For implementation details, see:
 - `docs/技术文档/BLE协议实现指南.md` (BLE Protocol Implementation Guide)
 - `docs/技术文档/系统架构设计.md` (System Architecture Design)
