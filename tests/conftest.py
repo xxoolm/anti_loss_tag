@@ -11,7 +11,6 @@ sys.path.insert(0, str(project_root))
 
 import pytest
 from homeassistant.core import HomeAssistant
-from homeassistant.setup import async_setup_component
 
 
 @pytest.fixture

@@ -10,11 +10,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import cast
+from typing import Any, cast
 
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak import BleakClient
 from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -139,9 +140,12 @@ class AntiLossTagDevice:
         self._connect_fail_count: int = 0
         self._cooldown_until_ts: float = 0.0
 
-        # 用于解决“同 UUID 多特征”的歧义：优先解析并缓存 handle
+        # 用于解决"同 UUID 多特征"的歧义：优先解析并缓存 handle
         self._alert_level_handle: int | None = None
         self._battery_level_handle: int | None = None
+
+        # 对齐 HA IQS log-when-unavailable：避免重复记录不可用日志
+        self._unavailability_logged: bool = False
 
     # -------------------------
     # Public read-only state
@@ -422,6 +426,11 @@ class AntiLossTagDevice:
         try:
             self._connected = False
 
+            # ====== 对齐 HA IQS log-when-unavailable：记录不可用日志（仅一次） ======
+            if not self._unavailability_logged:
+                _LOGGER.info("Device %s unavailable", self.name)
+                self._unavailability_logged = True
+
             # ====== 清除特征缓存（断开连接后缓存失效） ======
             # 清理特征缓存（如果失败，记录错误但继续清理）
             try:
@@ -533,6 +542,12 @@ class AntiLossTagDevice:
             self._last_error = None
             self._connect_fail_count = 0
             self._cooldown_until_ts = 0.0
+
+            # ====== 对齐 HA IQS log-when-unavailable：记录恢复日志（仅一次） ======
+            if self._unavailability_logged:
+                _LOGGER.info("Device %s recovered", self.name)
+                self._unavailability_logged = False
+
             self._resolve_gatt_handles()
             await self._async_enable_notifications()
             self._async_dispatch_update()
@@ -715,6 +730,76 @@ class AntiLossTagDevice:
                 return
         await self._async_write_bytes(UUID_WRITE_FFE2, value, prefer_response=True)
 
+    async def _async_gatt_operation_with_uuid_fallback(
+        self,
+        client: BleakClient,
+        char_specifier: str | int,
+        operation: str,
+        preferred_service_uuid: str | None = None,
+        require_write: bool = False,
+        write_data: bytes | None = None,
+        response: bool | None = None,
+    ) -> Any:
+        """统一的GATT操作函数，处理同UUID多特征的降级逻辑。
+
+        Args:
+            client: Bleak客户端实例
+            char_specifier: 特征标识符（UUID字符串或handle整数）
+            operation: 操作类型（'read' 或 'write'）
+            preferred_service_uuid: 优先匹配的服务UUID（可选）
+            require_write: 是否要求可写特征（用于handle解析）
+            write_data: 写入数据（仅write操作需要）
+            response: 是否要求响应（仅write操作需要）
+
+        Returns:
+            read操作返回读取的数据，write操作无返回值
+
+        Raises:
+            BleakError: 操作失败且无法降级时抛出
+        """
+        if operation not in ("read", "write"):
+            raise ValueError(f"不支持的GATT操作类型: {operation}")
+
+        def _resolve_handle_for_uuid(uuid_str: str) -> int | None:
+            """解析UUID对应的handle"""
+            return self._resolve_char_handle(
+                uuid_str,
+                preferred_service_uuid=preferred_service_uuid,
+                require_write=require_write,
+            )
+
+        async def _do_operation(specifier: str | int) -> Any:
+            """执行实际的GATT操作"""
+            if operation == "read":
+                return await client.read_gatt_char(specifier)
+            else:  # write
+                if write_data is None:
+                    raise ValueError("write操作需要提供write_data")
+                return await client.write_gatt_char(
+                    specifier, write_data, response=response
+                )  # type: ignore[arg-type]
+
+        try:
+            return await _do_operation(char_specifier)
+        except BleakError as err:
+            if isinstance(
+                char_specifier, str
+            ) and "Multiple Characteristics with this UUID" in str(err):
+                try:
+                    await client.get_services()
+                except BleakError:
+                    pass
+
+                handle = _resolve_handle_for_uuid(char_specifier)
+                if handle is not None:
+                    _LOGGER.debug(
+                        "UUID %s 触发多特征错误，降级使用 handle %s",
+                        char_specifier,
+                        handle,
+                    )
+                    return await _do_operation(handle)
+            raise
+
     async def async_read_battery(self, force_connect: bool) -> None:
         if self._client is None:
             if not force_connect:
@@ -733,27 +818,13 @@ class AntiLossTagDevice:
                     if self._battery_level_handle is not None
                     else UUID_BATTERY_LEVEL_2A19
                 )
-                # ====== 多特征同 UUID：电量读取按 handle 重试 ======
-                try:
-                    data = await client.read_gatt_char(char)
-                except BleakError as err:
-                    if isinstance(char, str) and "Multiple Characteristics with this UUID" in str(err):
-                        try:
-                            await client.get_services()
-                        except BleakError:
-                            pass
-                        handle = self._resolve_char_handle(
-                            char,
-                            preferred_service_uuid=_UUID_SERVICE_BATTERY_180F,
-                            require_write=False,
-                        )
-                        if handle is not None:
-                            data = await client.read_gatt_char(handle)
-                        else:
-                            raise
-                    else:
-                        raise
-                # ====== 结束 ======
+                data = await self._async_gatt_operation_with_uuid_fallback(
+                    client=client,
+                    char_specifier=char,
+                    operation="read",
+                    preferred_service_uuid=_UUID_SERVICE_BATTERY_180F,
+                    require_write=False,
+                )
                 if data and len(data) >= 1:
                     level = int(data[0])
                     level = max(0, min(100, level))
@@ -785,49 +856,35 @@ class AntiLossTagDevice:
             if client is None:
                 raise BleakError("没有可用的 BLE 客户端用于写入")
 
-            # ====== 多特征同 UUID：按 handle 重试（兼容 bleak 报错） ======
-            def _resolve_handle_for_uuid(u: str) -> int | None:
-                # 2A06（报警）通常在 1802 Immediate Alert 服务下；其余默认不限定服务
-                preferred = (
-                    _UUID_SERVICE_IMMEDIATE_ALERT_1802
-                    if u.lower() == UUID_ALERT_LEVEL_2A06.lower()
-                    else None
-                )
-                return self._resolve_char_handle(
-                    u, preferred_service_uuid=preferred, require_write=True
-                )
-
-            async def _write_with_possible_handle_retry(resp: bool) -> None:
-                try:
-                    await client.write_gatt_char(uuid, data, response=resp)
-                    return
-                except BleakError as err:
-                    if isinstance(uuid, str) and "Multiple Characteristics with this UUID" in str(err):
-                        try:
-                            await client.get_services()
-                        except BleakError:
-                            pass
-                        handle = _resolve_handle_for_uuid(uuid)
-                        if handle is not None:
-                            await client.write_gatt_char(handle, data, response=resp)
-                            return
-                    raise
-
-            # ====== 结束 ======
+            # 确定2A06（报警）的优先服务UUID
+            def _get_preferred_service(u: str) -> str | None:
+                if u.lower() == UUID_ALERT_LEVEL_2A06.lower():
+                    return _UUID_SERVICE_IMMEDIATE_ALERT_1802
+                return None
 
             # Try preferred response mode first, then fallback
-            try:
-                await _write_with_possible_handle_retry(prefer_response)
-                return
-            except (BleakError, TimeoutError, OSError):
-                pass
+            response_modes = [prefer_response, not prefer_response]
 
-            try:
-                await _write_with_possible_handle_retry(not prefer_response)
-            except (BleakError, TimeoutError, OSError) as err:
-                self._last_error = f"写入 {uuid} 失败: {err}"
-                self._async_dispatch_update()
-                raise
+            for i, response_mode in enumerate(response_modes):
+                try:
+                    await self._async_gatt_operation_with_uuid_fallback(
+                        client=client,
+                        char_specifier=uuid,
+                        operation="write",
+                        preferred_service_uuid=_get_preferred_service(uuid)
+                        if isinstance(uuid, str)
+                        else None,
+                        require_write=True,
+                        write_data=data,
+                        response=response_mode,
+                    )
+                    return
+                except (BleakError, TimeoutError, OSError) as err:
+                    if i < len(response_modes) - 1:
+                        continue
+                    self._last_error = f"写入 {uuid} 失败: {err}"
+                    self._async_dispatch_update()
+                    raise
 
     async def _async_battery_loop(self) -> None:
         while True:
