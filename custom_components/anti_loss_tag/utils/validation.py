@@ -72,9 +72,9 @@ def is_valid_device_name(name: str) -> bool:
     if len(name) == 0 or len(name) > 248:
         return False
 
-    # 检查是否包含控制字符（除空格、制表符外）
+    # 检查是否包含控制字符
     for char in name:
-        if ord(char) < 32 and char not in (" ", "\t"):
+        if ord(char) < 32:
             return False
 
     return True
