@@ -6,22 +6,24 @@
 
 - **类型**: Home Assistant 自定义集成（KT6368A BLE 防丢标签）
 - **芯片**: **KT6368A 双模蓝牙5.1 SoC（SOP-8封装）** - **专门适配**
-- **官方参考**: LenzeTech iSearching Two Android应用（739行Java代码）
-  - 应用名称：iSearching Two
-  - 开发商：LenzeTech（深圳岚至科技）
-  - 代码位置：archive/temp_files/
-  - 验证：FFE0/FFE1/FFE2协议完整实现
+- **技术标准**: 基于BLE核心规范和KT6368A芯片公开规格
+  - BLE Specification: Bluetooth Core Specification 5.1
+  - 芯片规格: KT6368A双模蓝牙5.1 SoC（SOP-8封装）
+  - 验证方式: 实际设备测试 + 协议抓包验证
 - **语言**: Python 3.11+
 - **主要依赖**: bleak >= 0.21.0, bleak-retry-connector >= 3.0.0
 - **代码位置**: `custom_components/anti_loss_tag/`
 
-**官方参考验证**：
-本集成基于LenzeTech官方Android应用（iSearching Two）的BLE协议实现，
-所有FFE0/FFE1/FFE2协议操作均已通过官方代码验证。
+**实现参考**：
+本集成基于以下公开标准和文档实现：
+- BLE Core Specification（GATT协议定义）
+- KT6368A芯片规格文档（FFE0/FFE1/FFE2服务定义）
+- bleak库官方文档和示例
+- Home Assistant集成最佳实践
 
-参考文档：
-- [Java代码审核](docs/Java参考/Java代码审核.md) - 官方代码架构分析
-- [Java到Python移植指南](docs/Java参考/Java到Python移植指南.md) - Python实现参考
+学习资料（独立参考）：
+- [BLE协议实现指南](docs/技术文档/BLE协议实现指南.md) - 标准协议解读
+- [架构设计文档](docs/技术文档/系统架构设计.md) - 系统设计说明
 
 ---
 

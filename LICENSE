@@ -19,3 +19,24 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## Third-Party Code Statement
+
+This project does not contain any third-party code. All implementations are
+original work based on the following public standards and documentation:
+
+- Bluetooth Core Specification 5.1 (GATT protocol definitions)
+- KT6368A chip public specification documents (FFE0/FFE1/FFE2 services)
+- bleak library official documentation and examples
+- Home Assistant integration best practices
+- Python asyncio programming best practices
+
+Reference materials are documented in `docs/参考资料/` for educational purposes
+only. No proprietary code has been copied or adapted from third-party sources.
+
+For implementation details, see:
+- `docs/技术文档/BLE协议实现指南.md` (BLE Protocol Implementation Guide)
+- `docs/技术文档/系统架构设计.md` (System Architecture Design)
+- `docs/风险排除修正整改方案.md` (Risk Remediation Plan)

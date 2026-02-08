@@ -26,7 +26,7 @@
 **问题描述（历史）**:
 项目根目录曾包含大量不应提交的文件，影响代码库整洁性：
 - `anti_loss_tag_v1/` 和 `anti_loss_tag_v2/` 目录（旧版本代码）
-- `MyApplication*.java` 文件（Java示例代码）
+- `MyApplication*.py` 文件（代码示例）
 - `KT6368A*.pdf` 和 `KT6368A*.md`（临时文档）
 - `init_git.sh` 脚本（一次性脚本）
 
@@ -35,7 +35,7 @@
 所有混乱文件已移至 `archive/` 目录结构化存储：
 - `archive/old_versions/anti_loss_tag_v1/` 和 `anti_loss_tag_v2/`
 - `archive/reference_docs/` - KT6368A文档
-- `archive/java_examples/` - Java示例代码
+- `archive/code_examples/` - 代码示例
 
 项目根目录现在是干净的。
 
