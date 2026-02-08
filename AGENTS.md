@@ -15,35 +15,15 @@
 
 ### 本地开发
 
-```bash
-# 开发时将代码复制到 Home Assistant 自定义组件目录
-cp -r custom_components/anti_loss_tag ~/.homeassistant/custom_components/
-
-# 重启 Home Assistant 或重新加载配置
-# 在 HA 中：配置 → 系统 → 服务器管理 → 重新加载核心 → YAML 配置重新加载
-```
+开发时将代码复制到 Home Assistant 自定义组件目录。重启 Home Assistant 或通过界面重新加载核心配置。
 
 ### 代码质量检查（建议添加）
 
-```bash
-# 格式化代码（如果添加 ruff）
-ruff check --fix custom_components/anti_loss_tag/
-ruff format custom_components/anti_loss_tag/
-
-# 类型检查（如果添加 mypy）
-mypy custom_components/anti_loss_tag/
-
-# Home Assistant 配置验证
-hass --script check_config --path ~/.homeassistant
-```
+使用 ruff 进行代码检查和格式化（检查目标：custom_components/anti_loss_tag/）。使用 mypy 进行类型检查。使用 hass 脚本验证 Home Assistant 配置（参数：--script check_config --path 配置目录路径）。
 
 ### 运行单个测试（未来）
 
-```bash
-# 当前无测试。如需添加，创建 tests/ 目录：
-# pytest tests/test_device.py::test_connection -v
-# pytest tests/test_sensor.py::TestBatterySensor -v
-```
+当前使用 pytest 作为测试框架。测试文件位于 tests/ 目录。运行测试时使用 pytest 命令，可指定测试文件和测试函数。
 
 ---
 
@@ -51,42 +31,15 @@ hass --script check_config --path ~/.homeassistant
 
 ### 2.1 导入顺序（严格）
 
-```python
-# 第 1 行：所有文件必须有
-from __future__ import annotations
+所有文件必须以 from __future__ import annotations 开头。然后按以下顺序组织：
 
-# 标准库
-import asyncio
-import logging
-from collections.abc import Callable
-from datetime import datetime
-
-# 第三方库
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from bleak.exc import BleakError
-
-# 本地模块（. 前缀）
-from .const import DOMAIN, CONF_ADDRESS
-from .device import AntiLossTagDevice
-```
+- 标准库导入（asyncio、logging、collections.abc、datetime 等）
+- 第三方库导入（homeassistant 模块、bleak 等）
+- 本地模块导入（使用相对导入，. 前缀）
 
 ### 2.2 类型注解（必须）
 
-- **所有函数**必须有返回类型
-- 使用 PEP 604 语法：`int | None` 而非 `Optional[int]`
-- 集合类型：`list[str]`、`dict[str, int]`、`set[Callable[[], None]]`
-
-```python
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """必须有 docstring 和类型注解。"""
-    pass
-
-@property
-def battery(self) -> int | None:
-    """属性也需要类型注解。"""
-    return self._battery
-```
+所有函数必须有返回类型注解。使用 PEP 604 语法表示可选类型（int | None 而非 Optional[int]）。集合类型使用内置泛型（list[str]、dict[str, int]、set[Callable[[], None]]）。属性也需要类型注解。
 
 ### 2.3 命名约定
 
@@ -100,87 +53,23 @@ def battery(self) -> int | None:
 
 ### 2.4 异步编程模式
 
-```python
-# HA 集成方法必须是 async
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    device = AntiLossTagDevice(hass, entry)
-    await device.async_maybe_connect_initial()
-
-# 回调使用 @callback（非 async）
-@callback
-def _async_on_bluetooth_event(self, service_info, change) -> None:
-    self._available = True
-    self._async_dispatch_update()
-
-# 锁保护共享状态
-async def async_ensure_connected(self) -> None:
-    async with self._connect_lock:
-        # 连接逻辑
-        pass
-
-# 任务创建：使用 hass.async_create_task()
-self._connect_task = self.hass.async_create_task(self.async_ensure_connected())
-```
+Home Assistant 集成方法必须是 async 函数。回调使用 callback 装饰器标记（非 async）。使用锁（async with）保护共享状态。任务创建使用 hass.async_create_task() 方法。
 
 ### 2.5 错误处理
 
-```python
-# 捕获特定异常
-try:
-    await client.get_services()
-except BleakNotFoundError as err:
-    self._last_error = f"设备未找到: {err}"
-    _LOGGER.error("Service discovery failed: %s", err)
-except (BleakError, TimeoutError) as err:
-    # 安全网
-    self._last_error = f"连接失败: {err}"
-    _LOGGER.exception("Unexpected error during connect")
-
-# 记录到最后错误（供 UI 显示）
-self._last_error: str | None = None
-```
+捕获特定异常（如 BleakNotFoundError），使用 _LOGGER 记录错误。使用 try-except 结构作为安全网捕获多种异常。记录最后错误到实例变量（类型：str | None）供 UI 显示。
 
 ### 2.6 UUID 管理
 
-```python
-# 所有 UUID 定义在 const.py，全小写
-UUID_NOTIFY_FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
-UUID_BATTERY_LEVEL_2A19 = "00002a19-0000-1000-8000-00805f9b34fb"
-UUID_ALERT_LEVEL_2A06 = "00002a06-0000-1000-8000-00805f9b34fb"
-
-# 命名格式：UUID_<SERVICE>_<CHARACTERISTIC> 或 UUID_SERVICE_<HEX>
-```
+所有 UUID 定义在 const.py，使用全小写字符串。命名格式：UUID_<SERVICE>_<CHARACTERISTIC> 或 UUID_SERVICE_<HEX>。
 
 ### 2.7 实体（Entity）模式
 
-```python
-class AntiLossTagBatterySensor(_AntiLossTagSensorBase):
-    # 类属性配置
-    _attr_device_class = SensorDeviceClass.BATTERY
-    _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
-        super().__init__(device, entry)
-        self._attr_name = "Battery"  # 或中文名 "电量"
-        self._attr_unique_id = f"{device.address}_battery"
-
-    @property
-    def native_value(self) -> int | None:
-        return self._dev.battery
-```
+实体类通过类属性配置设备类、单位和状态类。构造函数接收设备实例和配置条目，设置实体名称和唯一 ID。使用 property 装饰器暴露状态值。
 
 ### 2.8 文档和注释
 
-- **注释语言**：中文注释，英文变量/函数名
-- **公开方法**：必须有 docstring（中文或英文）
-- **常量分组**：使用注释分隔
-
-```python
-# ====== 多设备并发连接控制 ======
-# 代码段
-# ====== 结束 ======
-```
+使用中文注释，英文变量和函数名。公开方法必须有 docstring（中文或英文）。使用注释分隔常量分组。
 
 ---
 
@@ -188,34 +77,11 @@ class AntiLossTagBatterySensor(_AntiLossTagSensorBase):
 
 ### Config Flow
 
-```python
-class AntiLossTagConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 1
-
-    async def async_step_bluetooth(self, discovery_info) -> FlowResult:
-        await self.async_set_unique_id(discovery_info.address)
-        self._abort_if_unique_id_configured()
-        return await self.async_step_confirm()
-
-class OptionsFlowHandler(config_entries.OptionsFlow):
-    async def async_step_init(self, user_input=None) -> FlowResult:
-        schema = vol.Schema({
-            vol.Required(CONF_BATTERY_POLL_INTERVAL_MIN): vol.All(
-                int, vol.Range(min=5, max=7 * 24 * 60)
-            ),
-        })
-```
+Config Flow 类继承 config_entries.ConfigFlow，设置 VERSION 为 1。实现 async_step_bluetooth 方法处理蓝牙发现，设置唯一 ID 并检查是否已配置。OptionsFlowHandler 类继承 config_entries.OptionsFlow，实现 async_step_init 方法处理配置选项，使用 vol.Schema 定义验证规则。
 
 ### DeviceInfo
 
-```python
-DeviceInfo(
-    identifiers={(DOMAIN, self._dev.address)},  # 使用地址作为唯一标识
-    name=self._dev.name,
-    manufacturer="Unknown",
-    model="BLE Anti-Loss Tag",
-)
-```
+DeviceInfo 使用设备地址作为唯一标识符（identifiers 参数），设置设备名称、制造商和型号。
 
 ---
 
@@ -223,21 +89,7 @@ DeviceInfo(
 
 ### 连接管理
 
-- **全局连接槽位**：`BleConnectionManager` 使用 `asyncio.Semaphore` 限制并发
-- **退避策略**：连接失败后指数退避（`2^n` 秒），避免连接风暴
-- **锁使用**：`_connect_lock` 保护连接操作，`_gatt_lock` 保护读写
-
-```python
-# 获取槽位
-acq = await self._conn_mgr.acquire(timeout=20.0)
-if not acq.acquired:
-    backoff = min(30, (2 ** self._connect_fail_count))
-    return
-
-# 失败释放
-if self._conn_mgr is not None and self._conn_slot_acquired:
-    await self._conn_mgr.release()
-```
+BleConnectionManager 使用 asyncio.Semaphore 限制并发连接（全局连接槽位）。连接失败后使用指数退避策略（2 的 n 次方秒），避免连接风暴。使用 _connect_lock 保护连接操作，使用 _gatt_lock 保护 GATT 读写操作。槽位获取设置超时时间（如 20.0 秒），失败时计算退避时间（最小 30 秒）。
 
 ### 状态暴露
 
@@ -266,17 +118,7 @@ if self._conn_mgr is not None and self._conn_slot_acquired:
 
 ## 6. 调试技巧
 
-```bash
-# 查看 Home Assistant 日志
-tail -f ~/.homeassistant/home-assistant.log | grep anti_loss_tag
-
-# 在 configuration.yaml 中启用调试
-logger:
-  default: info
-  logs:
-    custom_components.anti_loss_tag: debug
-    bleak: debug
-```
+查看 Home Assistant 日志可使用 tail 命令跟踪日志文件并过滤 anti_loss_tag 相关内容。在 configuration.yaml 中配置 logger 部分启用调试日志，设置日志级别为 debug，可针对 custom_components.anti_loss_tag 和 bleak 组件启用。
 
 ---
 

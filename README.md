@@ -19,10 +19,9 @@
 1. HACS → 商店 → 搜索 "Anti Loss Tag" → 安装
 2. 重启 Home Assistant
 
-**手动安装**:
-```bash
-cp -r custom_components/anti_loss_tag ~/.homeassistant/custom_components/
-```
+**手动安装**：
+
+将 custom_components/anti_loss_tag 目录复制到 Home Assistant 的配置目录中的 custom_components 子目录，然后重启 Home Assistant。
 
 ### 配置
 
@@ -61,76 +60,185 @@ cp -r custom_components/anti_loss_tag ~/.homeassistant/custom_components/
 |  Java 代码审核 | Java 参考 | [docs/Java参考/Java代码审核.md](docs/Java参考/Java代码审核.md) |
 |  Java 移植指南 | Java 参考 | [docs/Java参考/Java到Python移植指南.md](docs/Java参考/Java到Python移植指南.md) |
 
+##  技术架构
+
+### 系统边界与角色
+
+本项目作为 Home Assistant 自定义集成运行，提供 BLE 防丢标签设备的管理功能。系统边界限定于单个 BLE 设备的连接、控制和状态监控。通过 Home Assistant 的实体系统暴露设备状态，支持自动化和用户交互。
+
+### 组件划分
+
+项目采用分层架构，主要包含以下层次：
+
+- 集成层：处理 Home Assistant 生命周期管理（加载、卸载、配置更新）
+- 设备层：管理单个 BLE 设备的连接、状态和 GATT 操作
+- 实体层：将设备状态暴露为 Home Assistant 实体（传感器、按钮、开关、事件）
+- 工具层：提供验证、常量和 GATT 操作辅助功能
+
+### 运行形态
+
+集成加载后创建设备实例，根据配置选项决定连接模式：
+
+- 维持连接模式：设备始终保持连接，状态实时更新
+- 按需连接模式：仅在需要时建立连接，操作完成后断开
+
+支持被动重连（通过蓝牙事件触发）和主动重连（指数退避策略）。连接状态变化通过实体更新反映到 Home Assistant 界面。
+
+### 主流程链路
+
+1. Home Assistant 加载集成，调用 async_setup_entry
+2. 创建全局 BLE 连接槽位管理器（最多 3 个并发连接）
+3. 初始化设备实例，从配置条目读取地址和名称
+4. 设置平台（传感器、二进制传感器、开关、按钮、事件）
+5. 启动设备连接任务（如果配置为维持连接）
+6. 处理蓝牙事件和状态变化
+7. 更新实体状态并触发自动化
+
+### 配置加载时机
+
+- 初始配置：集成首次添加时通过 Config Flow 创建
+- 运行时修改：通过 Options Flow 修改配置选项，立即应用
+
+### 依赖作用点
+
+- bleak：在设备连接、GATT 读写操作中使用
+- bleak-retry-connector：在连接重试和槽位管理中使用
+- bluetooth_adapters：在设备发现和连接中使用
+
+### 扩展点
+
+- 实体类型：可通过添加新平台扩展（需在 __init__.py 的 PLATFORMS 列表中注册）
+- GATT 操作：可通过 gatt_operations 模块扩展特征值操作
+- 验证规则：可通过 utils/validation.py 扩展输入验证
+
+##  技术方向
+
+### 技术定位
+
+本项目是 Home Assistant 的本地设备集成，通过 BLE 协议与防丢标签设备通信。主要使用场景包括物品防丢、位置提醒和远程控制。设计目标是提供低延迟、低功耗、高可靠的设备管理方案。
+
+### 稳定性与兼容策略
+
+版本号遵循语义化版本规范（主版本.次版本.修订号）。向后兼容性通过 Config Flow 和 Options Flow 维护。已弃用模块（coordinator.py、ble.py）保留在 archived 目录但标记为弃用，未来版本可能移除（遵循 PEP 387 软弃用政策）。
+
+### 工程化约束
+
+- 代码风格：遵循 AGENTS.md 和 docs/技术文档/开发规范.md 中定义的规范
+- 类型注解：所有函数必须包含返回类型注解，使用 PEP 604 语法
+- 测试：使用 pytest 进行单元测试，目标覆盖率 80%
+- 文档：关键变更必须同步更新 README.md 和 CHANGELOG.md
+
+### 安全与权限边界
+
+- 不处理用户敏感数据，仅管理设备连接和状态
+- BLE 地址作为设备标识符存储在配置中
+- 不建立网络连接，仅使用本地 BLE 通信
+- 不写入文件系统，除 Home Assistant 日志外
+
+### 可观测性口径
+
+- 通过 Home Assistant 日志记录关键事件和错误（日志级别：INFO、WARNING、ERROR）
+- 传感器实体暴露设备状态（电量、信号强度、连接状态）
+- 最后错误信息通过"最后错误"传感器实体可见
+- 支持调试模式（在 configuration.yaml 中设置日志级别为 debug）
+
+##  一致性契约清单
+
+为确保文档与代码的一致性，以下变更必须同步更新文档：
+
+### 新增或修改配置项时
+
+必须同步文档位置：docs/用户文档/配置指南.md 和 AGENTS.md
+
+必须同步内容：
+- 配置项名称、类型、默认值
+- 取值约束和验证规则
+- 配置来源（entry.data 或 entry.options）
+- 覆盖顺序和生效时机
+- 实现位置（文件路径和行号）
+
+### 新增或修改实体类型时
+
+必须同步文档位置：README.md（实体章节）
+
+必须同步内容：
+- 实体类型（传感器、二进制传感器、按钮、开关、事件）
+- 实体列表和功能描述
+- 注册位置（文件路径）
+
+### 入口点或运行形态变化时
+
+必须同步文档位置：README.md（技术架构章节）和 AGENTS.md
+
+必须同步内容：
+- 主流程链路
+- 运行形态（连接模式）
+- 组件划分
+
+### 依赖或环境变化时
+
+必须同步文档位置：README.md（技术细节章节）和 manifest.json
+
+必须同步内容：
+- 依赖名称和版本要求
+- 用途说明（运行时/开发依赖）
+- Home Assistant 最低版本要求
+
+### 涉及 BLE 协议或外部规范变化时
+
+必须同步文档位置：docs/技术文档/BLE 协议规范.md
+
+必须重新核实：
+- 与 Bluetooth SIG 官方规范对齐
+- UUID 格式和特征值行为
+- 写入方法（Write vs Write Without Response）
+- 数据格式和取值范围
+- 更新外部规范对齐清单
+
 ##  技术细节
 
-**依赖项**:
-- Home Assistant >= 2024.1.0
-- bleak >= 0.21.0
-- bleak-retry-connector >= 3.0.0
+**依赖项**：
 
-**支持设备**:
-- 服务 UUID: `0000ffe0-0000-1000-8000-00805f9b34fb`
-- 通知特征: `0000ffe1-0000-1000-8000-00805f9b34fb`
+运行时依赖：
+- Home Assistant：版本 2024.1.0 或更高
+- bleak：版本 0.21.0 或更高（BLE GATT 客户端库）
+- bleak-retry-connector：版本 3.0.0 或更高（连接重试机制）
+- bluetooth_adapters：Home Assistant 蓝牙适配器集成
 
-**项目结构**:
-```
-custom_components/anti_loss_tag/
-├── __init__.py           # 集成入口
-├── manifest.json         # 集成清单
-├── const.py             # 常量定义
-├── config_flow.py       # 配置流程
-├── device.py            # 设备管理
-├── connection_manager.py # 连接管理器
-├── sensor.py            # 传感器实体
-├── binary_sensor.py     # 二进制传感器实体
-├── button.py            # 按钮实体
-├── switch.py            # 开关实体
-└── event.py             # 事件实体
-```
+开发依赖：
+- pytest：版本 7.4.0 或更高（测试框架）
+- pytest-cov：版本 4.1.0 或更高（测试覆盖率）
+- pytest-homeassistant-custom-component：版本 0.13.0 或更高（HA 测试组件）
+
+**支持设备**：
+
+服务 UUID：0000ffe0-0000-1000-8000-00805f9b34fb
+
+关键特征：
+- 通知特征：0000ffe1-0000-1000-8000-00805f9b34fb（按钮事件上报）
+- 写入特征：0000ffe2-0000-1000-8000-00805f9b34fb（断连报警配置）
+- 报警级别特征：00002a06-0000-1000-8000-00805f9b34fb（即时报警控制）
+- 电量特征：00002a19-0000-1000-8000-00805f9b34fb（电量读取）
+
+**项目结构**：
+
+完整的项目结构详见下面的"开发"章节中的"项目结构"部分，包括所有模块、工具目录和归档文件的说明。
 
 ##  开发
 
 ### 运行测试
 
-```bash
-# 安装测试依赖
-pip install -r requirements-test.txt
+使用 pytest 框架运行测试。首先通过 pip 安装 requirements-test.txt 中的测试依赖。运行测试时可以使用以下命令形式：
 
-# 运行所有测试
-pytest
-
-# 运行单个测试文件
-pytest tests/test_validation.py -v
-
-# 运行特定测试
-pytest tests/test_validation.py::test_is_valid_ble_address -v
-
-# 查看测试覆盖率
-pytest --cov=custom_components/anti_loss_tag --cov-report=html
-```
+- 运行所有测试：直接执行 pytest\n- 运行单个测试文件：指定测试文件路径，使用 -v 参数显示详细输出\n- 运行特定测试：指定文件和测试函数名，使用双冒号分隔\n- 查看测试覆盖率：使用 --cov 参数指定覆盖率目标，使用 --cov-report 生成报告格式（如 html）
 
 ### 代码质量检查
 
-```bash
-# 使用 ruff 进行代码检查（如果已安装）
-ruff check custom_components/anti_loss_tag/
-
-# 格式化代码
-ruff format custom_components/anti_loss_tag/
-
-# 类型检查（如果已安装 mypy）
-mypy custom_components/anti_loss_tag/
-```
+使用 ruff 进行代码检查和格式化（如果已安装）。使用 mypy 进行类型检查（如果已安装）。检查目标为 custom_components/anti_loss_tag/ 目录。
 
 ### 本地开发
 
-```bash
-# 复制到 Home Assistant 自定义组件目录
-cp -r custom_components/anti_loss_tag ~/.homeassistant/custom_components/
-
-# 重启 Home Assistant 或重新加载配置
-# 在 HA 中：配置 → 系统 → 服务器管理 → 重新加载核心 → YAML 配置重新加载
-```
+将 custom_components/anti_loss_tag 目录复制到 Home Assistant 的自定义组件目录。重启 Home Assistant 或通过界面重新加载核心配置（配置 → 系统 → 服务器管理 → 重新加载核心）。
 
 ### 项目结构
 
