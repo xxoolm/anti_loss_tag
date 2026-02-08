@@ -1,6 +1,5 @@
 {
-	"domain": "anti_loss_tag",
-	"name": "BLE 防丢标签",
+	"name": "KT6368A BLE 防丢标签",
 	"version": "1.1.0",
 	"config_flow": true,
 	"documentation": "https://gitaa.com/MMMM/anti_loss_tag",
