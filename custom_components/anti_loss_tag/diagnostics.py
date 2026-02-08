@@ -69,14 +69,12 @@ async def async_get_config_entry_diagnostics(
     conn_mgr_info = {}
     if DOMAIN in hass.data and "_conn_mgr" in hass.data[DOMAIN]:
         conn_mgr: BleConnectionManager | None = hass.data[DOMAIN].get("_conn_mgr")
-        if conn_mgr and hasattr(conn_mgr, "_semaphore"):
+        if conn_mgr:
+            max_conn = getattr(conn_mgr, "_max_connections", "unknown")
+            sem = getattr(conn_mgr, "_sem", None)
             conn_mgr_info = {
-                "max_connections": conn_mgr._semaphore._value
-                if conn_mgr._semaphore
-                else "unknown",
-                "connection_slots_available": conn_mgr._semaphore._value
-                if conn_mgr._semaphore
-                else "unknown",
+                "max_connections": max_conn,
+                "connection_slots_available": sem._value if sem else "unknown",
             }
 
     # Redact sensitive address (show only first 6 chars)
@@ -113,6 +111,7 @@ async def async_get_config_entry_diagnostics(
                 else None
             ),
             "last_error": device.last_error,
+            "connection_error_type": device._connection_error_type,
             "maintain_connection": device.maintain_connection,
             "auto_reconnect": device.auto_reconnect,
             "alarm_on_disconnect": device.alarm_on_disconnect,

@@ -86,5 +86,6 @@ class AntiLossTagBatterySensor(_AntiLossTagSensorBase):
 
     @property
     def available(self) -> bool:
-        # Battery is only known after at least one successful read
-        return self._dev.battery is not None
+        # 设备可用即可，电量值可能为 None（显示 unknown）
+        # 只要设备广告可见或曾经连接过，传感器就可用
+        return self._dev.available or self._dev.battery is not None

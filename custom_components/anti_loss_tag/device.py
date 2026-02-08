@@ -147,6 +147,11 @@ class AntiLossTagDevice:
         # 对齐 HA IQS log-when-unavailable：避免重复记录不可用日志
         self._unavailability_logged: bool = False
 
+        # 连接失败分类（用于诊断和重试决策）
+        self._connection_error_classification: str | None = None
+        self._connection_error_type: str | None = None
+        self._last_connect_attempt: datetime | None = None
+
     # -------------------------
     # Public read-only state
     # -------------------------
@@ -469,21 +474,27 @@ class AntiLossTagDevice:
         if self.auto_reconnect and self.maintain_connection:
             self._ensure_connect_task()
 
-    async def async_ensure_connected(self) -> None:
-        """Ensure BLE connection is established and ready for GATT operations."""
+    async def async_ensure_connected(self) -> bool:
+        """Ensure BLE connection is established and ready for GATT operations.
+
+        Returns:
+            True if connection is ready for GATT operations, False otherwise.
+        """
         async with self._connect_lock:
             # ====== 连接退避：避免多设备同时冲连接 ======
             now_ts = time.time()
             if now_ts < self._cooldown_until_ts:
-                return
+                return False
             if self._connected and self._client is not None:
-                return
+                return True
 
             ble_device = bluetooth.async_ble_device_from_address(
                 self.hass, self.address, connectable=True
             )
             if ble_device is None:
                 self._last_error = "No connectable BLEDevice available (out of range or no connectable scanner)."
+                self._connection_error_classification = "scanner_unavailable"
+                self._connection_error_type = "device_not_connectable"
                 self._connected = False
                 self._client = None
 
@@ -491,7 +502,7 @@ class AntiLossTagDevice:
                 await self._release_connection_slot()
                 # ====== 结束 ======
                 self._async_dispatch_update()
-                return
+                return False
 
             # ====== 获取全局连接槽位（跨设备并发控制） ======
             if self._conn_mgr is not None and not self._conn_slot_acquired:
@@ -505,10 +516,12 @@ class AntiLossTagDevice:
                     self._last_error = (
                         f"等待连接槽位中({acq.reason}); {backoff}s 后重试"
                     )
+                    self._connection_error_classification = "slot_timeout"
+                    self._connection_error_type = f"acquire_failed:{acq.reason}"
                     self._connected = False
                     self._client = None
                     self._async_dispatch_update()
-                    return
+                    return False
                 self._conn_slot_acquired = True
             # ====== 结束 ======
 
@@ -532,10 +545,12 @@ class AntiLossTagDevice:
                     max_backoff=MAX_CONNECT_BACKOFF_SECONDS
                 )
                 self._last_error = f"连接失败: {err}; {backoff}s 后重试"
+                self._connection_error_classification = "connect_error"
+                self._connection_error_type = type(err).__name__
                 self._connected = False
                 self._client = None
                 self._async_dispatch_update()
-                return
+                return False
 
             try:
                 # 访问 services 属性触发服务发现（bleak 的 services 是 property）
@@ -546,6 +561,8 @@ class AntiLossTagDevice:
                     max_backoff=MAX_CONNECT_BACKOFF_SECONDS
                 )
                 self._last_error = f"服务发现失败: {err}; {backoff}s 后重试"
+                self._connection_error_classification = "service_discovery_error"
+                self._connection_error_type = "BleakError"
                 self._connected = False
                 self._client = None
                 self._async_dispatch_update()
@@ -553,11 +570,13 @@ class AntiLossTagDevice:
                     await client.disconnect()
                 except BleakError:
                     pass
-                return
+                return False
 
             self._client = client
             self._connected = True
             self._last_error = None
+            self._connection_error_classification = None
+            self._connection_error_type = None
             self._connect_fail_count = 0
             self._cooldown_until_ts = 0.0
 
@@ -568,6 +587,7 @@ class AntiLossTagDevice:
 
             self._resolve_gatt_handles()
             await self._async_enable_notifications()
+            return True
             self._async_dispatch_update()
 
     async def async_disconnect(self) -> None:
@@ -821,9 +841,20 @@ class AntiLossTagDevice:
     async def async_read_battery(self, force_connect: bool) -> None:
         if self._client is None:
             if not force_connect:
+                # 节流日志：只在首次或长时间未读取时记录
+                if self._last_battery_read is None:
+                    _LOGGER.debug(
+                        "设备 %s 电量尚未读取，但当前未连接且未启用强制连接（将在首次读取时自动尝试）",
+                        self.address,
+                    )
                 return
-            await self.async_ensure_connected()
-            if self._client is None:
+            connected = await self.async_ensure_connected()
+            if not connected or self._client is None:
+                _LOGGER.warning(
+                    "设备 %s 无法建立连接以读取电量: %s",
+                    self.address,
+                    self._last_error or "未知错误",
+                )
                 return
 
         async with self._gatt_lock:
@@ -848,6 +879,7 @@ class AntiLossTagDevice:
                     level = max(0, min(100, level))
                     self._battery = level
                     self._last_battery_read = datetime.now(timezone.utc)
+                    _LOGGER.debug("设备 %s 电量读取成功: %d%%", self.address, level)
                     self._async_dispatch_update()
             except BleakError as err:
                 self._last_error = f"读取电量失败: {err}"
@@ -860,19 +892,20 @@ class AntiLossTagDevice:
         self, uuid: str | int, data: bytes, prefer_response: bool
     ) -> None:
         if self._client is None:
-            # If we maintain connection, schedule connect then retry once
-            if self.maintain_connection:
-                await self.async_ensure_connected()
-            else:
-                # For on-demand mode, connect transiently just for this write
-                await self.async_ensure_connected()
-                if self._client is None:
-                    raise BleakError("没有可用的 BLE 客户端用于写入")
+            connected = await self.async_ensure_connected()
+            if not connected or self._client is None:
+                error_detail = self._last_error or "未知错误"
+                raise BleakError(
+                    f"无法为设备 {self.name}({self.address}) 建立连接用于写入 {uuid}: {error_detail}"
+                )
 
         async with self._gatt_lock:
             client = self._client
             if client is None:
-                raise BleakError("没有可用的 BLE 客户端用于写入")
+                error_detail = self._last_error or "未知错误"
+                raise BleakError(
+                    f"无法为设备 {self.name}({self.address}) 获取 BLE 客户端用于写入 {uuid}: {error_detail}"
+                )
 
             # 确定2A06（报警）的优先服务UUID
             def _get_preferred_service(u: str) -> str | None:
@@ -912,9 +945,10 @@ class AntiLossTagDevice:
                 jitter = random.randint(0, BATTERY_POLL_JITTER_SECONDS)
                 await asyncio.sleep(base + jitter)
                 # ====== 结束 ======
-                await self.async_read_battery(
-                    force_connect=not self.maintain_connection
-                )
+
+                # 首次读取或电量为 None 时，强制建立连接
+                force = (self._battery is None) or (not self.maintain_connection)
+                await self.async_read_battery(force_connect=force)
             except asyncio.CancelledError:
                 # 任务被取消，清理资源后重新抛出
                 _LOGGER.debug("Battery loop cancelled for %s", self.address)
