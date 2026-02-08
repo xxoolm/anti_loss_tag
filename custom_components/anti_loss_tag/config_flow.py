@@ -87,7 +87,18 @@ class AntiLossTagConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         schema = vol.Schema({vol.Required("confirm", default=True): bool})
-        return self.async_show_form(step_id="confirm", data_schema=schema)
+        address = self._address or self._discovery.address
+        name = (
+            self._name or self._discovery.name or self._discovery.device.name or address
+        )
+        return self.async_show_form(
+            step_id="confirm",
+            data_schema=schema,
+            description_placeholders={
+                "name": name,
+                "address": address,
+            },
+        )
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         """Manual setup."""

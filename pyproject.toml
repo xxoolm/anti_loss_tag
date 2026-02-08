@@ -1,6 +1,6 @@
 [project]
 name = "anti_loss_tag"
-version = "1.4.0"
+version = "1.6.9"
 description = "KT6368A BLE 防丢标签 Home Assistant 集成"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -56,23 +56,6 @@ source = ["custom_components/anti_loss_tag"]
 omit = [
     "*/tests/*",
     "*/test_*.py",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-    "@abstractmethod",
-]
-
-[tool.coverage.run]
-source = ["custom_components/anti_loss_tag"]
-omit = [
-    "*/tests/*",
     "*/archived/*",
     "*/__pycache__/*",
 ]
@@ -85,4 +68,5 @@ exclude_lines = [
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
+    "@abstractmethod",
 ]

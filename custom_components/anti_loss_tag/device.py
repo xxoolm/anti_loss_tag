@@ -48,10 +48,8 @@ from .const import (
 from .connection_manager import BleConnectionManager
 from .utils.constants import (
     BATTERY_POLL_JITTER_SECONDS,
-    MIN_CONNECT_BACKOFF_SECONDS,
     MAX_CONNECT_BACKOFF_SECONDS,
     MAX_CONNECT_FAIL_COUNT,
-    DEFAULT_BLEAK_TIMEOUT,
     CONNECTION_SLOT_ACQUIRE_TIMEOUT,
     ENTITY_UPDATE_DEBOUNCE_SECONDS,
 )
@@ -514,7 +512,7 @@ class AntiLossTagDevice:
                 return
 
             try:
-                await client.get_services()
+                _services = client.services
             except BleakError as err:
                 await self._release_connection_slot()
                 backoff = self._apply_connect_backoff(
@@ -739,11 +737,9 @@ class AntiLossTagDevice:
                 try:
                     data = await client.read_gatt_char(char)
                 except BleakError as err:
-                    if isinstance(
-                        char, str
-                    ) and "该 UUID 对应多个特征" in str(err):
+                    if isinstance(char, str) and "该 UUID 对应多个特征" in str(err):
                         try:
-                            await client.get_services()
+                            _services = client.services
                         except BleakError:
                             pass
                         handle = self._resolve_char_handle(
@@ -806,11 +802,9 @@ class AntiLossTagDevice:
                     await client.write_gatt_char(uuid, data, response=resp)
                     return
                 except BleakError as err:
-                    if isinstance(
-                        uuid, str
-                    ) and "该 UUID 对应多个特征" in str(err):
+                    if isinstance(uuid, str) and "该 UUID 对应多个特征" in str(err):
                         try:
-                            await client.get_services()
+                            _services = client.services
                         except BleakError:
                             pass
                         handle = _resolve_handle_for_uuid(uuid)

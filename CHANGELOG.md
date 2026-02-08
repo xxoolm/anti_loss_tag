@@ -15,6 +15,39 @@
 
 ---
 
+## [1.6.9] - 2026-02-09
+
+### 修复（致命错误）
+- **device.py**: 修复 BleakClient API 不匹配问题
+  - 第 517 行：`await client.get_services()` → `client.services`
+  - 第 746 行：`await client.get_services()` → `client.services`
+  - 第 813 行：`await client.get_services()` → `client.services`
+  - 根据 bleak >= 0.21.0 官方文档，`get_services()` 方法已被移除
+  - `services` 是 property（属性），不需要 await 调用
+  - 修复导致所有蓝牙通信功能完全失效的 AttributeError
+
+### 修复（用户体验）
+- **config_flow.py**: 添加翻译占位符支持
+  - 第 81 行：添加 `description_placeholders` 参数
+  - 提供设备名称和 MAC 地址占位符的值
+  - 修复前端翻译字符串格式化错误（MISSING_VALUE）
+
+### 改进
+- **代码质量**: 删除未使用的导入（asyncio、MIN_CONNECT_BACKOFF_SECONDS、DEFAULT_BLEAK_TIMEOUT）
+- **代码规范**: 使用 `_services` 变量名表示故意的未使用变量
+
+### 修复（版本同步）
+- **manifest.json**: 更新版本号从 1.6.7 到 1.6.9
+- **pyproject.toml**: 更新版本号从 1.4.0 到 1.6.9
+- **配置修复**: 移除 pyproject.toml 中重复的 `[tool.coverage.run]` 和 `[tool.coverage.report]` 键
+
+### 技术细节
+- 参考 bleak 官方 API 文档：https://bleak.readthedocs.io/en/latest/api/client.html
+- 参考 Home Assistant 翻译文档：https://developers.home-assistant.io/docs/internationalization/core/
+- 所有代码通过 ruff 检查和格式化
+
+---
+
 ## [1.4.0] - 2025-02-08
 
 ### 修复
@@ -230,6 +263,10 @@
 
 ---
 
-[未发布]: https://github.com/xxoolm/anti_loss_tag/compare/v1.1.0...HEAD
+[未发布]: https://github.com/xxoolm/anti_loss_tag/compare/v1.6.9...HEAD
+[1.6.9]: https://github.com/xxoolm/anti_loss_tag/compare/v1.6.8...v1.6.9
+[1.4.0]: https://github.com/xxoolm/anti_loss_tag/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/xxoolm/anti_loss_tag/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/xxoolm/anti_loss_tag/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/xxoolm/anti_loss_tag/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/xxoolm/anti_loss_tag/releases/tag/v1.0.0

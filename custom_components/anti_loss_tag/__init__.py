@@ -3,7 +3,6 @@
 # See LICENSE file for details
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
