@@ -2,7 +2,7 @@
 
 > **专门为KT6368A蓝牙芯片和定制固件适配的Home Assistant集成**
 
-> **Git历史说明**: 本项目在v1.6.0版本重构后完全基于公开标准（BLE Specification、KT6368A芯片规格）实现。早期历史中的第三方引用和Java文件已使用git-filter-repo工具清理。
+> **Git历史说明**: 本项目在v1.6.0版本重构后完全基于公开标准（BLE Specification、KT6368A芯片规格）实现。早期历史中的第三方引用和Java文件已使用git-filter-repo工具清理。详见 [BRANCHES.md](BRANCHES.md) 了解分支结构和保护措施。
 
 ##  免责声明
 
