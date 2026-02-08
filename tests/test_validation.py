@@ -1,11 +1,10 @@
 """测试输入验证工具."""
 
-import pytest
 from custom_components.anti_loss_tag.utils.validation import (
     is_valid_ble_address,
     is_valid_device_name,
-    is_valid_gatt_handle,
-    is_valid_battery_level,
+    validate_gatt_handle,
+    validate_battery_level,
 )
 
 
@@ -30,7 +29,7 @@ class TestBLEAddressValidation:
         assert is_valid_ble_address("AA:BB:CC:DD:EE:GG") is False  # 无效字符
         assert is_valid_ble_address("") is False  # 空字符串
         assert is_valid_ble_address("invalid") is False  # 完全无效
-        assert is_valid_ble_address(None) is False  # None
+        assert is_valid_ble_address(None) is False  # type: ignore[arg-type]  # None
 
     def test_mac_address_with_spaces(self):
         """测试带空格的 MAC 地址."""
@@ -52,7 +51,7 @@ class TestDeviceNameValidation:
         """测试无效的设备名称."""
         assert is_valid_device_name("") is False  # 空字符串
         assert is_valid_device_name("   ") is False  # 仅空格
-        assert is_valid_device_name(None) is False  # None
+        assert is_valid_device_name(None) is False  # type: ignore[arg-type]  # None
         assert is_valid_device_name("Tag\x00\x01") is False  # 包含控制字符
         assert is_valid_device_name("A" * 300) is False  # 超过最大长度
 
@@ -68,30 +67,30 @@ class TestGATTHandleValidation:
 
     def test_valid_handles(self):
         """测试有效的 GATT 句柄."""
-        assert is_valid_gatt_handle(0) is True
-        assert is_valid_gatt_handle(1) is True
-        assert is_valid_gatt_handle(255) is True
-        assert is_valid_gatt_handle(65535) is True
+        assert validate_gatt_handle(0) is True
+        assert validate_gatt_handle(1) is True
+        assert validate_gatt_handle(255) is True
+        assert validate_gatt_handle(65535) is True
 
     def test_invalid_handles(self):
         """测试无效的 GATT 句柄."""
-        assert is_valid_gatt_handle(-1) is False
-        assert is_valid_gatt_handle(65536) is False
-        assert is_valid_gatt_handle(None) is False
+        assert validate_gatt_handle(-1) is False
+        assert validate_gatt_handle(65536) is False
+        assert validate_gatt_handle(None) is False  # type: ignore[arg-type]
 
 
 class TestBatteryLevelValidation:
     """测试电池电量验证."""
 
     def test_valid_battery_levels(self):
-        """测试有效的电池电量."""
-        assert is_valid_battery_level(0) is True
-        assert is_valid_battery_level(50) is True
-        assert is_valid_battery_level(100) is True
+        """测试有效电量应原样返回."""
+        assert validate_battery_level(0) == 0
+        assert validate_battery_level(50) == 50
+        assert validate_battery_level(100) == 100
 
     def test_invalid_battery_levels(self):
-        """测试无效的电池电量."""
-        assert is_valid_battery_level(-1) is False
-        assert is_valid_battery_level(101) is False
-        assert is_valid_battery_level(None) is False
-        assert is_valid_battery_level(150) is False
+        """测试越界电量会被钳制，非数字返回 None."""
+        assert validate_battery_level(-1) == 0
+        assert validate_battery_level(101) == 100
+        assert validate_battery_level(None) is None  # type: ignore[arg-type]
+        assert validate_battery_level(150) == 100

@@ -1,21 +1,19 @@
 """测试常量定义."""
 
-import pytest
 from custom_components.anti_loss_tag.utils.constants import (
     # BLE 配置
     DEFAULT_BLEAK_TIMEOUT,
     CONNECTION_SLOT_ACQUIRE_TIMEOUT,
     # 电池轮询
-    BATTERY_POLL_INTERVAL_MIN,
     BATTERY_POLL_JITTER_SECONDS,
+    MIN_BATTERY_POLL_INTERVAL_MIN,
+    MAX_BATTERY_POLL_INTERVAL_MIN,
     # 连接退避
     MIN_CONNECT_BACKOFF_SECONDS,
     MAX_CONNECT_BACKOFF_SECONDS,
     MAX_CONNECT_FAIL_COUNT,
     # 实体更新
     ENTITY_UPDATE_DEBOUNCE_SECONDS,
-    # 按钮防抖动
-    BUTTON_DEBOUNCE_SECONDS,
 )
 
 
@@ -39,8 +37,9 @@ class TestBatteryPolling:
     def test_poll_interval_is_reasonable(self):
         """测试轮询间隔是合理的."""
         # 轮询间隔应该在 5 分钟到 24 小时之间
-        assert BATTERY_POLL_INTERVAL_MIN >= 5
-        assert BATTERY_POLL_INTERVAL_MIN <= 7 * 24 * 60  # 7 天
+        assert MIN_BATTERY_POLL_INTERVAL_MIN >= 5
+        assert MAX_BATTERY_POLL_INTERVAL_MIN <= 7 * 24 * 60  # 7 天
+        assert MIN_BATTERY_POLL_INTERVAL_MIN < MAX_BATTERY_POLL_INTERVAL_MIN
 
     def test_jitter_is_reasonable(self):
         """测试抖动时间是合理的."""
@@ -72,15 +71,6 @@ class TestEntityUpdateDebounce:
         assert ENTITY_UPDATE_DEBOUNCE_SECONDS <= 5.0  # 最多 5 秒
 
 
-class TestButtonDebounce:
-    """测试按钮防抖动."""
-
-    def test_button_debounce_is_positive(self):
-        """测试按钮防抖动时间是正数."""
-        assert BUTTON_DEBOUNCE_SECONDS > 0
-        assert BUTTON_DEBOUNCE_SECONDS <= 2.0  # 最多 2 秒
-
-
 class TestConstantTypes:
     """测试常量类型."""
 
@@ -89,12 +79,12 @@ class TestConstantTypes:
         assert isinstance(DEFAULT_BLEAK_TIMEOUT, float)
         assert isinstance(CONNECTION_SLOT_ACQUIRE_TIMEOUT, float)
         assert isinstance(ENTITY_UPDATE_DEBOUNCE_SECONDS, float)
-        assert isinstance(BUTTON_DEBOUNCE_SECONDS, float)
 
     def test_interval_constants_are_ints(self):
         """测试间隔常量是整数."""
-        assert isinstance(BATTERY_POLL_INTERVAL_MIN, int)
         assert isinstance(BATTERY_POLL_JITTER_SECONDS, int)
+        assert isinstance(MIN_BATTERY_POLL_INTERVAL_MIN, int)
+        assert isinstance(MAX_BATTERY_POLL_INTERVAL_MIN, int)
         assert isinstance(MIN_CONNECT_BACKOFF_SECONDS, int)
         assert isinstance(MAX_CONNECT_BACKOFF_SECONDS, int)
         assert isinstance(MAX_CONNECT_FAIL_COUNT, int)
