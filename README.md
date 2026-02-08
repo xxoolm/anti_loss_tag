@@ -429,5 +429,5 @@ MIT License
 
 ##  链接
 
-- GitHub: https://gitaa.com/MMMM/anti_loss_tag
-- 问题反馈: https://gitaa.com/MMMM/anti_loss_tag/issues
+- GitHub: https://github.com/xxoolm/anti_loss_tag
+- 问题反馈: https://github.com/xxoolm/anti_loss_tag/issues

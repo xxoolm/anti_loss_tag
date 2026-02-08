@@ -185,12 +185,12 @@
 
 ## 链接
 
-- [GitHub Repository](https://gitaa.com/MMMM/anti_loss_tag)
-- [Issue Tracker](https://gitaa.com/MMMM/anti_loss_tag/issues)
+- [GitHub Repository](https://github.com/xxoolm/anti_loss_tag)
+- [Issue Tracker](https://github.com/xxoolm/anti_loss_tag/issues)
 - [文档索引](docs/索引.md)
 
 ---
 
-[未发布]: https://gitaa.com/MMMM/anti_loss_tag/compare/v1.1.0...HEAD
-[1.1.0]: https://gitaa.com/MMMM/anti_loss_tag/compare/v1.0.0...v1.1.0
-[1.0.0]: https://gitaa.com/MMMM/anti_loss_tag/releases/tag/v1.0.0
+[未发布]: https://github.com/xxoolm/anti_loss_tag/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/xxoolm/anti_loss_tag/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/xxoolm/anti_loss_tag/releases/tag/v1.0.0
