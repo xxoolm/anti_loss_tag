@@ -59,7 +59,7 @@ class AntiLossTagRssiSensor(_AntiLossTagSensorBase):
 
     def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
         super().__init__(device, entry)
-        self._attr_name = "Signal Strength"
+        self._attr_name = "信号强度"
         self._attr_unique_id = f"{device.address}_rssi"
 
     @property
@@ -75,7 +75,7 @@ class AntiLossTagBatterySensor(_AntiLossTagSensorBase):
 
     def __init__(self, device: AntiLossTagDevice, entry: ConfigEntry) -> None:
         super().__init__(device, entry)
-        self._attr_name = "Battery"
+        self._attr_name = "电量"
         self._attr_unique_id = f"{device.address}_battery"
 
     @property

@@ -30,7 +30,7 @@ class AntiLossTagDisconnectAlarmPolicySwitch(AntiLossTagEntityMixin, SwitchEntit
         self._dev = device
         self._entry = entry
         self._unsub = None
-        self._attr_name = "Disconnect Alarm"
+        self._attr_name = "断开连接时报警"
         self._attr_unique_id = f"{device.address}_alarm_on_disconnect"
 
     async def async_added_to_hass(self) -> None:

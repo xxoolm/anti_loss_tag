@@ -741,7 +741,7 @@ class AntiLossTagDevice:
                 except BleakError as err:
                     if isinstance(
                         char, str
-                    ) and "Multiple Characteristics with this UUID" in str(err):
+                    ) and "该 UUID 对应多个特征" in str(err):
                         try:
                             await client.get_services()
                         except BleakError:
@@ -808,7 +808,7 @@ class AntiLossTagDevice:
                 except BleakError as err:
                     if isinstance(
                         uuid, str
-                    ) and "Multiple Characteristics with this UUID" in str(err):
+                    ) and "该 UUID 对应多个特征" in str(err):
                         try:
                             await client.get_services()
                         except BleakError:

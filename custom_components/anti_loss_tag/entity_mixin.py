@@ -19,6 +19,6 @@ class AntiLossTagEntityMixin:
         return DeviceInfo(
             identifiers={(DOMAIN, self._dev.address)},
             name=self._dev.name,
-            manufacturer="Unknown",
-            model="BLE Anti-Loss Tag",
+            manufacturer="未知",
+            model="KT6368A 防丢标签",
         )

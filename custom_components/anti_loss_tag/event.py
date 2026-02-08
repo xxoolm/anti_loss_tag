@@ -27,7 +27,7 @@ class AntiLossTagButtonEventEntity(AntiLossTagEntityMixin, EventEntity):
     def __init__(self, device: AntiLossTagDevice) -> None:
         self._dev = device
         self._unsub_btn = None
-        self._attr_name = "Button"
+        self._attr_name = "按键触发"
         self._attr_unique_id = f"{device.address}_button_event"
 
     async def async_added_to_hass(self) -> None:

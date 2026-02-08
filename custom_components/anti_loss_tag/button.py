@@ -51,7 +51,7 @@ class _AntiLossTagButtonBase(AntiLossTagEntityMixin, ButtonEntity):
 class AntiLossTagStartAlarmButton(_AntiLossTagButtonBase):
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = "Start Alarm"
+        self._attr_name = "开始报警"
         self._attr_unique_id = f"{device.address}_start_alarm"
 
     async def async_press(self) -> None:
@@ -61,7 +61,7 @@ class AntiLossTagStartAlarmButton(_AntiLossTagButtonBase):
 class AntiLossTagStopAlarmButton(_AntiLossTagButtonBase):
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = "Stop Alarm"
+        self._attr_name = "停止报警"
         self._attr_unique_id = f"{device.address}_stop_alarm"
 
     async def async_press(self) -> None:

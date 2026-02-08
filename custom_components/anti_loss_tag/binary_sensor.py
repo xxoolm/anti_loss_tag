@@ -49,7 +49,7 @@ class AntiLossTagInRangeBinarySensor(_AntiLossTagBinaryBase):
 
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = "In Range"
+        self._attr_name = "在线状态"
         self._attr_unique_id = f"{device.address}_in_range"
 
     @property
@@ -62,7 +62,7 @@ class AntiLossTagConnectedBinarySensor(_AntiLossTagBinaryBase):
 
     def __init__(self, device: AntiLossTagDevice) -> None:
         super().__init__(device)
-        self._attr_name = "Connected"
+        self._attr_name = "连接状态"
         self._attr_unique_id = f"{device.address}_connected"
 
     @property
