@@ -139,6 +139,35 @@
 - GATT 操作：可通过 gatt_operations 模块扩展特征值操作
 - 验证规则：可通过 utils/validation.py 扩展输入验证
 
+### 官方参考实现
+
+本项目基于LenzeTech官方Android应用（iSearching Two）的BLE协议实现进行移植。
+
+**官方代码信息**：
+- 应用名称：iSearching Two
+- 开发商：LenzeTech（深圳岚至科技）
+- 代码来源：archive/temp_files/MyApplication.java (526行) + MyApplication$3.java (213行)
+- 代码类型：官方Android应用反编译代码（生产级验证）
+- 反编译工具：Jadx
+
+**关键协议验证**：
+- FFE0服务UUID：官方扫描过滤实现
+- FFE1通知特征：官方按钮事件处理（第115行代码验证）
+- FFE2写入特征：官方断开报警策略实现（第120-128行）
+- 2A06/2A19：标准UUID在KT6368A固件中的实现
+
+**架构借鉴**：
+- 单例模式：全局BLE设备管理器
+- 观察者模式：事件驱动架构
+- 重连策略：指数退避算法（5次重连）
+- 状态管理：多HashMap集群管理
+
+**参考文档**：
+- [Java代码审核](docs/Java参考/Java代码审核.md) - 官方代码架构分析
+- [Java到Python移植指南](docs/Java参考/Java到Python移植指南.md) - Python实现参考
+- [KT6368A硬件文档](docs/参考资料/KT6368A硬件文档.md) - 芯片规格和引脚定义
+- [KT6368A固件文档](docs/参考资料/KT6368A固件文档.md) - FFE0/FFE1/FFE2协议详细说明
+
 ##  技术方向
 
 ### 技术定位
