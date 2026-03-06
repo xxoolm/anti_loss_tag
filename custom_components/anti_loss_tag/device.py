@@ -778,6 +778,12 @@ class AntiLossTagDevice:
 
     def _set_connection_state(self, state: str) -> None:
         if self._connection_state != state:
+            _LOGGER.debug(
+                "设备 %s 连接状态变更: %s -> %s",
+                self.address,
+                self._connection_state,
+                state,
+            )
             self._connection_state = state
 
     def _on_disconnect(self, _client) -> None:
@@ -787,6 +793,7 @@ class AntiLossTagDevice:
         All cleanup operations must be non-blocking.
         """
         try:
+            _LOGGER.debug("设备 %s 断开连接回调触发", self.address)
             self._connected = False
             self._set_connection_state("degraded")
 
@@ -799,10 +806,11 @@ class AntiLossTagDevice:
             # 清理特征缓存（如果失败，记录错误但继续清理）
             try:
                 self._cached_chars.clear()
+                _LOGGER.debug("设备 %s 特征缓存已清除", self.address)
             except Exception as err:
-                _LOGGER.error("Error clearing characteristic cache: %s", err)
+                _LOGGER.error("设备 %s 清除特征缓存失败: %s", self.address, err)
         except Exception as err:
-            _LOGGER.error("Error in disconnect callback: %s", err)
+            _LOGGER.error("设备 %s 断开连接回调处理异常: %s", self.address, err)
         finally:
             # ====== 断开：归还全局连接槽位 ======
             # 确保资源释放一定会执行
@@ -826,18 +834,31 @@ class AntiLossTagDevice:
             # ====== 连接退避：避免多设备同时冲连接 ======
             now_ts = time.time()
             if now_ts < self._cooldown_until_ts:
+                _LOGGER.debug(
+                    "设备 %s 连接处于退避期，剩余 %.1f 秒",
+                    self.address,
+                    self._cooldown_until_ts - now_ts,
+                )
                 self._set_connection_state("backoff")
                 return False
             if self._connected and self._client is not None:
+                _LOGGER.debug("设备 %s 已连接，复用现有连接", self.address)
                 self._set_connection_state("ready")
                 return True
 
+            _LOGGER.debug(
+                "设备 %s 开始建立连接（目的：%s）", self.address, connect_purpose
+            )
             self._set_connection_state("connecting")
 
             ble_device = bluetooth.async_ble_device_from_address(
                 self.hass, self.address, connectable=True
             )
             if ble_device is None:
+                _LOGGER.warning(
+                    "设备 %s 未找到可连接的BLE设备（超出范围或无可用扫描器）",
+                    self.address,
+                )
                 self._last_error = "No connectable BLEDevice available (out of range or no connectable scanner)."
                 self._connection_error_classification = "scanner_unavailable"
                 self._connection_error_type = "device_not_connectable"
@@ -856,10 +877,22 @@ class AntiLossTagDevice:
                 slot_timeout = self._compute_slot_acquire_timeout(
                     connect_purpose=connect_purpose
                 )
+                _LOGGER.debug(
+                    "设备 %s 尝试获取连接槽位（超时：%.1f秒）",
+                    self.address,
+                    slot_timeout,
+                )
                 acq = await self._conn_mgr.acquire(timeout=slot_timeout)
                 if not acq.acquired:
                     backoff = self._apply_connect_backoff(
                         max_backoff=MAX_CONNECT_BACKOFF_SECONDS // 2
+                    )
+                    _LOGGER.warning(
+                        "设备 %s 获取连接槽位失败（原因：%s，超时：%.1f秒），%.1f秒后重试",
+                        self.address,
+                        acq.reason,
+                        slot_timeout,
+                        backoff,
                     )
                     self._last_error = f"等待连接槽位中({acq.reason}, timeout={slot_timeout:.1f}s); {backoff}s 后重试"
                     self._connection_error_classification = "slot_timeout"
@@ -869,10 +902,12 @@ class AntiLossTagDevice:
                     self._set_connection_state("backoff")
                     self._async_dispatch_update()
                     return False
+                _LOGGER.debug("设备 %s 成功获取连接槽位", self.address)
                 self._conn_slot_acquired = True
             # ====== 结束 ======
 
             try:
+                _LOGGER.debug("设备 %s 正在建立BLE连接...", self.address)
                 client: BleakClientWithServiceCache = await establish_connection(
                     BleakClientWithServiceCache,
                     ble_device,
@@ -880,6 +915,7 @@ class AntiLossTagDevice:
                     disconnected_callback=self._on_disconnect,
                     ble_device_callback=self._ble_device_callback,
                 )
+                _LOGGER.debug("设备 %s BLE连接已建立", self.address)
             except (
                 BleakOutOfConnectionSlotsError,
                 BleakNotFoundError,
@@ -887,6 +923,9 @@ class AntiLossTagDevice:
                 BleakConnectionError,
             ) as err:
                 # ====== 连接失败：归还全局连接槽位 + 退避 ======
+                _LOGGER.warning(
+                    "设备 %s 连接失败（%s）: %s", self.address, type(err).__name__, err
+                )
                 await self._release_connection_slot()
                 backoff = self._apply_connect_backoff(
                     max_backoff=MAX_CONNECT_BACKOFF_SECONDS
@@ -900,11 +939,14 @@ class AntiLossTagDevice:
                 self._async_dispatch_update()
                 return False
 
+            _LOGGER.debug("设备 %s 开始服务发现...", self.address)
             self._set_connection_state("discovering")
             try:
                 # 访问 services 属性触发服务发现（bleak 的 services 是 property）
                 _ = client.services
+                _LOGGER.debug("设备 %s 服务发现完成", self.address)
             except BleakError as err:
+                _LOGGER.error("设备 %s 服务发现失败: %s", self.address, err)
                 await self._release_connection_slot()
                 backoff = self._apply_connect_backoff(
                     max_backoff=MAX_CONNECT_BACKOFF_SECONDS
@@ -935,8 +977,15 @@ class AntiLossTagDevice:
                 _LOGGER.info("Device %s recovered", self.name)
                 self._unavailability_logged = False
 
+            _LOGGER.debug("设备 %s 执行连接后初始化...", self.address)
             init_ok = await self._async_post_connect_setup()
             self._set_connection_state("ready" if init_ok else "degraded")
+            _LOGGER.info(
+                "设备 %s 连接就绪（目的：%s，状态：%s）",
+                self.address,
+                connect_purpose,
+                "ready" if init_ok else "degraded",
+            )
             self._async_dispatch_update()
             return True
 
