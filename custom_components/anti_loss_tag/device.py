@@ -10,7 +10,9 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, TypeVar, cast
+
+T = TypeVar("T")
 
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
@@ -294,6 +296,78 @@ class AntiLossTagDevice:
         return self._opt_int(
             CONF_BATTERY_POLL_INTERVAL_MIN, DEFAULT_BATTERY_POLL_INTERVAL_MIN
         )
+
+    # -------------------------
+    # 辅助函数
+    # -------------------------
+    async def _async_retry_with_backoff(
+        self,
+        operation: Callable[[], Awaitable[T]],
+        max_retries: int = 3,
+        initial_delay: float = 1.0,
+        max_delay: float = 10.0,
+        operation_name: str = "操作",
+    ) -> T:
+        """带指数退避的异步重试辅助函数。
+
+        细化错误类型，区分可重试和不可重试的错误：
+        - 可重试：BleakConnectionError, TimeoutError, OSError（临时性错误）
+        - 不可重试：BleakNotFoundError, ValueError（永久性错误）
+
+        Args:
+            operation: 要执行的异步操作
+            max_retries: 最大重试次数
+            initial_delay: 初始延迟（秒）
+            max_delay: 最大延迟（秒）
+            operation_name: 操作名称（用于日志）
+
+        Returns:
+            操作结果
+
+        Raises:
+            BleakError: BLE操作失败
+            asyncio.CancelledError: 任务被取消
+        """
+        retryable_errors = (BleakConnectionError, TimeoutError, OSError)
+        non_retryable_errors = (BleakNotFoundError, ValueError, asyncio.CancelledError)
+
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                return await operation()
+            except non_retryable_errors as err:
+                _LOGGER.error(
+                    "设备 %s %s失败（不可重试）: %s",
+                    self.address,
+                    operation_name,
+                    err,
+                )
+                raise
+            except retryable_errors as err:
+                last_error = err
+                if attempt < max_retries:
+                    delay = min(initial_delay * (2**attempt), max_delay)
+                    _LOGGER.warning(
+                        "设备 %s %s失败（尝试 %d/%d）: %s，%.1f秒后重试...",
+                        self.address,
+                        operation_name,
+                        attempt + 1,
+                        max_retries + 1,
+                        err,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    _LOGGER.error(
+                        "设备 %s %s失败（已达最大重试次数 %d）: %s",
+                        self.address,
+                        operation_name,
+                        max_retries + 1,
+                        err,
+                    )
+
+        raise BleakError(f"{operation_name}失败: {last_error}")
 
     # -------------------------
     # Lifecycle
@@ -1249,12 +1323,26 @@ class AntiLossTagDevice:
                     self._last_battery_read = datetime.now(timezone.utc)
                     _LOGGER.debug("设备 %s 电量读取成功: %d%%", self.address, level)
                     self._async_dispatch_update()
-            except BleakError as err:
-                self._last_error = f"读取电量失败: {err}"
+            except BleakNotFoundError as err:
+                self._last_error = f"电量特征未找到（不可重试）: {err}"
+                _LOGGER.error("设备 %s %s", self.address, self._last_error)
                 self._async_dispatch_update()
-            except (TimeoutError, OSError, asyncio.CancelledError) as err:
-                self._last_error = f"读取电量失败（超时或系统错误）: {err}"
+            except BleakConnectionError as err:
+                self._last_error = f"读取电量失败（连接错误）: {err}"
+                _LOGGER.warning("设备 %s %s", self.address, self._last_error)
                 self._async_dispatch_update()
+            except BleakAbortedError as err:
+                self._last_error = f"读取电量失败（操作中止）: {err}"
+                _LOGGER.warning("设备 %s %s", self.address, self._last_error)
+                self._async_dispatch_update()
+            except (TimeoutError, OSError) as err:
+                self._last_error = f"读取电量失败（临时错误）: {err}"
+                _LOGGER.warning("设备 %s %s", self.address, self._last_error)
+                self._async_dispatch_update()
+            except asyncio.CancelledError:
+                _LOGGER.debug("设备 %s 电量读取被取消", self.address)
+                self._async_dispatch_update()
+                raise
 
     async def _async_write_bytes(
         self,
@@ -1303,11 +1391,55 @@ class AntiLossTagDevice:
                         write_data=data,
                         response=response_mode,
                     )
+                    _LOGGER.debug(
+                        "设备 %s 写入 %s 成功（response=%s）",
+                        self.address,
+                        uuid,
+                        response_mode,
+                    )
                     return
-                except (BleakError, TimeoutError, OSError) as err:
+                except BleakNotFoundError as err:
+                    self._last_error = f"写入特征 {uuid} 未找到（不可重试）: {err}"
+                    _LOGGER.error("设备 %s %s", self.address, self._last_error)
+                    self._async_dispatch_update()
+                    raise
+                except BleakConnectionError as err:
                     if i < len(response_modes) - 1:
+                        _LOGGER.debug(
+                            "设备 %s 写入 %s 失败（连接错误，尝试备用响应模式）: %s",
+                            self.address,
+                            uuid,
+                            err,
+                        )
+                        continue
+                    self._last_error = f"写入 {uuid} 失败（连接错误）: {err}"
+                    _LOGGER.warning("设备 %s %s", self.address, self._last_error)
+                    self._async_dispatch_update()
+                    raise
+                except (TimeoutError, OSError) as err:
+                    if i < len(response_modes) - 1:
+                        _LOGGER.debug(
+                            "设备 %s 写入 %s 失败（临时错误，尝试备用响应模式）: %s",
+                            self.address,
+                            uuid,
+                            err,
+                        )
+                        continue
+                    self._last_error = f"写入 {uuid} 失败（临时错误）: {err}"
+                    _LOGGER.warning("设备 %s %s", self.address, self._last_error)
+                    self._async_dispatch_update()
+                    raise
+                except BleakError as err:
+                    if i < len(response_modes) - 1:
+                        _LOGGER.debug(
+                            "设备 %s 写入 %s 失败（BLE错误，尝试备用响应模式）: %s",
+                            self.address,
+                            uuid,
+                            err,
+                        )
                         continue
                     self._last_error = f"写入 {uuid} 失败: {err}"
+                    _LOGGER.error("设备 %s %s", self.address, self._last_error)
                     self._async_dispatch_update()
                     raise
 
